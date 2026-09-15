@@ -53,13 +53,22 @@ Future<void> goToTab(WidgetTester tester, String label) async {
   );
 }
 
-/// Switches to the Search tab if needed and runs a query.
-Future<void> searchFor(WidgetTester tester, String query) async {
-  if (find.text('EXACT MATCH').evaluate().isEmpty &&
-      find.widgetWithText(TextField, 'Search anything…').evaluate().isEmpty) {
+/// Switches to the Search tab if needed and types into one category
+/// field. Defaults to the rental-number field for an all-digit query and
+/// the customer-name field otherwise; pass [field] for the others.
+Future<void> searchFor(
+  WidgetTester tester,
+  String query, {
+  String? field,
+}) async {
+  if (find.widgetWithText(TextField, 'Rental number').evaluate().isEmpty) {
     await goToTab(tester, 'Search');
   }
-  await tester.enterText(find.byType(TextField).first, query);
+  final label = field ??
+      (RegExp(r'^\d+$').hasMatch(query.trim())
+          ? 'Rental number'
+          : 'Customer name');
+  await tester.enterText(find.widgetWithText(TextField, label), query);
   await settle(tester);
 }
 

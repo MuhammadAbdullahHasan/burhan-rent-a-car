@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_services.dart';
 import '../widgets/common.dart';
@@ -9,9 +10,11 @@ import 'customer_detail_screen.dart';
 import 'rental_detail_screen.dart';
 import 'vehicle_detail_screen.dart';
 
-/// One search box. No category selector: the query is classified by the
-/// data layer's [UniversalSearchService] and every applicable lookup runs
-/// against local SQLite.
+/// Categorised search: one field per identifier. Typing in a field runs
+/// that category's lookup only, so a number typed into "Rental number" is
+/// never mistaken for part of a phone number and vice versa. Whichever
+/// field was edited last is the active one; the others are cleared so it's
+/// always unambiguous which search the results belong to.
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
 
@@ -19,29 +22,107 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
+class _SearchField {
+  final SearchScope scope;
+  final String label;
+  final String hint;
+  final IconData icon;
+  final TextInputType keyboard;
+  final List<TextInputFormatter> formatters;
+  final TextEditingController controller = TextEditingController();
+
+  _SearchField({
+    required this.scope,
+    required this.label,
+    required this.hint,
+    required this.icon,
+    required this.keyboard,
+    this.formatters = const [],
+  });
+}
+
 class _SearchScreenState extends State<SearchScreen> {
-  final _controller = TextEditingController();
+  late final List<_SearchField> _fields = [
+    _SearchField(
+      scope: SearchScope.rentalNo,
+      label: 'Rental number',
+      hint: 'e.g. 23',
+      icon: Icons.receipt_long,
+      keyboard: TextInputType.number,
+      formatters: [FilteringTextInputFormatter.digitsOnly],
+    ),
+    _SearchField(
+      scope: SearchScope.customerName,
+      label: 'Customer name',
+      hint: 'Full or partial name',
+      icon: Icons.person,
+      keyboard: TextInputType.name,
+    ),
+    _SearchField(
+      scope: SearchScope.phone,
+      label: 'Mobile number',
+      hint: 'e.g. 0300 1234567',
+      icon: Icons.phone,
+      keyboard: TextInputType.phone,
+    ),
+    _SearchField(
+      scope: SearchScope.cnic,
+      label: 'CNIC',
+      hint: 'e.g. 42201-1234567-1',
+      icon: Icons.badge,
+      keyboard: TextInputType.number,
+    ),
+    _SearchField(
+      scope: SearchScope.vehicle,
+      label: 'Vehicle registration',
+      hint: 'e.g. KHI-123',
+      icon: Icons.directions_car,
+      keyboard: TextInputType.text,
+    ),
+  ];
+
   Timer? _debounce;
   List<SearchResult> _results = const [];
   bool _searching = false;
+  _SearchField? _active;
   String _lastQuery = '';
 
   @override
   void dispose() {
     _debounce?.cancel();
-    _controller.dispose();
+    for (final f in _fields) {
+      f.controller.dispose();
+    }
     super.dispose();
   }
 
-  void _onChanged(String value) {
+  void _onChanged(_SearchField field, String value) {
+    if (_active != field) {
+      for (final other in _fields) {
+        if (other != field && other.controller.text.isNotEmpty) {
+          other.controller.clear();
+        }
+      }
+      _active = field;
+    }
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 220), () => _run(value));
+    _debounce = Timer(
+      const Duration(milliseconds: 220),
+      () => _run(field, value),
+    );
   }
 
-  Future<void> _run(String query) async {
+  Future<void> _run(_SearchField field, String query) async {
     final services = AppScope.of(context);
-    setState(() => _searching = true);
-    final results = await services.search.search(services.db, query);
+    setState(() {
+      _searching = true;
+      _active = field;
+    });
+    final results = await services.search.searchScoped(
+      services.db,
+      query,
+      field.scope,
+    );
     if (!mounted) return;
     setState(() {
       _results = results;
@@ -50,15 +131,24 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  /// On submit (not on every keystroke, which would hijack typing), a query
-  /// that matches exactly one unique identifier opens that record directly.
-  Future<void> _onSubmitted(String query) async {
+  /// Submitting a field that matched exactly one unique identifier opens
+  /// that record directly.
+  Future<void> _onSubmitted(_SearchField field, String query) async {
     _debounce?.cancel();
-    await _run(query);
+    await _run(field, query);
     if (!mounted) return;
-    final services = AppScope.of(context);
-    final sole = services.search.soleExactMatch(_results);
+    final sole = AppScope.of(context).search.soleExactMatch(_results);
     if (sole != null) _open(sole);
+  }
+
+  void _clear(_SearchField field) {
+    field.controller.clear();
+    _debounce?.cancel();
+    setState(() {
+      _results = const [];
+      _lastQuery = '';
+      if (_active == field) _active = null;
+    });
   }
 
   Future<void> _open(SearchResult result) async {
@@ -77,7 +167,9 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
     };
     await Navigator.of(context).push(route);
-    if (mounted && _lastQuery.isNotEmpty) _run(_lastQuery);
+    if (mounted && _active != null && _lastQuery.isNotEmpty) {
+      _run(_active!, _lastQuery);
+    }
   }
 
   @override
@@ -85,62 +177,81 @@ class _SearchScreenState extends State<SearchScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Search')),
-      body: Column(
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: TextField(
-              controller: _controller,
-              autofocus: false,
-              textInputAction: TextInputAction.search,
-              onChanged: _onChanged,
-              onSubmitted: _onSubmitted,
-              decoration: InputDecoration(
-                hintText: 'Search anything…',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _controller.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _controller.clear();
-                          setState(() {
-                            _results = const [];
-                            _lastQuery = '';
-                          });
-                        },
-                      ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Column(
+                children: [
+                  for (final field in _fields) _buildField(field, theme),
+                ],
               ),
             ),
           ),
-          if (_searching) const LinearProgressIndicator(minHeight: 2),
-          Expanded(child: _body(theme)),
+          if (_searching)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+          const SizedBox(height: 16),
+          _resultsSection(theme),
         ],
       ),
     );
   }
 
-  Widget _body(ThemeData theme) {
-    if (_lastQuery.isEmpty) {
+  Widget _buildField(_SearchField field, ThemeData theme) {
+    final isActive = _active == field && field.controller.text.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: field.controller,
+        keyboardType: field.keyboard,
+        inputFormatters: field.formatters,
+        textInputAction: TextInputAction.search,
+        onChanged: (v) => _onChanged(field, v),
+        onSubmitted: (v) => _onSubmitted(field, v),
+        decoration: InputDecoration(
+          labelText: field.label,
+          hintText: field.hint,
+          prefixIcon: Icon(
+            field.icon,
+            color: isActive ? theme.colorScheme.primary : null,
+          ),
+          suffixIcon: field.controller.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear',
+                  icon: const Icon(Icons.clear, size: 18),
+                  onPressed: () => _clear(field),
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _resultsSection(ThemeData theme) {
+    if (_active == null || _lastQuery.isEmpty) {
       return const EmptyState(
         icon: Icons.search,
-        message: 'Search by rental number, customer name, phone,\n'
-            'CNIC, or vehicle registration.\n\n'
-            'One box — no need to pick a category.',
+        message: 'Type into any field above.\n'
+            'Each field searches only its own category.',
       );
     }
     if (_results.isEmpty && !_searching) {
       return EmptyState(
         icon: Icons.search_off,
-        message: 'Nothing matched "$_lastQuery".',
+        message: 'No ${_active!.label.toLowerCase()} matched "$_lastQuery".',
       );
     }
 
     final exact = _results.where((r) => r.isExactMatch).toList();
     final partial = _results.where((r) => !r.isExactMatch).toList();
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (exact.isNotEmpty) ...[
           _GroupLabel(label: 'EXACT MATCH', theme: theme),
@@ -155,7 +266,9 @@ class _SearchScreenState extends State<SearchScreen> {
         ],
         if (partial.isNotEmpty) ...[
           _GroupLabel(
-            label: exact.isEmpty ? 'RESULTS' : 'OTHER MATCHES',
+            label: exact.isEmpty
+                ? '${_active!.label.toUpperCase()} · ${partial.length} RESULT${partial.length == 1 ? '' : 'S'}'
+                : 'OTHER MATCHES',
             theme: theme,
           ),
           Card(
@@ -223,12 +336,7 @@ class _ResultTile extends StatelessWidget {
       subtitle: result.subtitle.isEmpty
           ? null
           : Text(result.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: Text(
-        result.matchedOn,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
+      trailing: const Icon(Icons.chevron_right),
     );
   }
 }

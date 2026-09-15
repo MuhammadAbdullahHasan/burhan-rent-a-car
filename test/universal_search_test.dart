@@ -108,6 +108,60 @@ void main() {
       expect(await search.search(db, '   '), isEmpty);
     });
 
+  });
+
+  group('scoped search: one category per field', () {
+    test('rental-number field matches the exact number only', () async {
+      final results = await search.searchScoped(db, '23', SearchScope.rentalNo);
+      expect(results, hasLength(1));
+      expect(results.single.title, 'Rental #23');
+      // Digits that only occur inside phone numbers find nothing here.
+      final none = await search.searchScoped(db, '1234', SearchScope.rentalNo);
+      expect(none, isEmpty);
+    });
+
+    test('name field never returns rentals or vehicles', () async {
+      final results =
+          await search.searchScoped(db, 'Khan', SearchScope.customerName);
+      expect(results, isNotEmpty);
+      expect(results.every((r) => r.type == SearchResultType.customer), isTrue);
+      expect(results.map((r) => r.title), contains('Billa Khan'));
+    });
+
+    test('mobile field: exact match ranks first, partial digits still match',
+        () async {
+      final exact = await search.searchScoped(db, '03001234567', SearchScope.phone);
+      expect(exact.first.isExactMatch, isTrue);
+      expect(exact.first.title, 'Billa Khan');
+
+      final partial = await search.searchScoped(db, '1234567', SearchScope.phone);
+      expect(partial.length, greaterThan(1));
+      expect(partial.every((r) => r.type == SearchResultType.customer), isTrue);
+      // A digit string is not treated as a rental number in this field.
+      expect(partial.where((r) => r.type == SearchResultType.rental), isEmpty);
+    });
+
+    test('CNIC field matches with or without dashes', () async {
+      for (final q in ['42201-1234567-1', '4220112345671']) {
+        final results = await search.searchScoped(db, q, SearchScope.cnic);
+        expect(results.first.title, 'Billa Khan', reason: q);
+        expect(results.first.isExactMatch, isTrue);
+      }
+    });
+
+    test('vehicle field ignores separators and case', () async {
+      final results = await search.searchScoped(db, 'khi 123', SearchScope.vehicle);
+      expect(results.first.title, 'KHI-123');
+      expect(results.first.isExactMatch, isTrue);
+      expect(results.every((r) => r.type == SearchResultType.vehicle), isTrue);
+    });
+
+    test('empty query returns nothing in every scope', () async {
+      for (final scope in SearchScope.values) {
+        expect(await search.searchScoped(db, '  ', scope), isEmpty);
+      }
+    });
+
     test('a pending offline rental is excluded from number search but kept',
         () async {
       final engine = LocalSyncEngine();

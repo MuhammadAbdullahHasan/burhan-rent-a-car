@@ -93,7 +93,6 @@ void main() {
 
     expect(find.byType(SearchScreen), findsOneWidget);
     expect(find.text('Billa Khan'), findsOneWidget);
-    expect(find.text('Name'), findsOneWidget);
   });
 
   testWidgets('universal search finds an exact rental number', (t) async {
