@@ -290,6 +290,73 @@ void main() {
     });
   });
 
+  group('Sync Now resolves a Pending rental', () {
+    testWidgets('Home shows a Sync Now action while something is pending',
+        (t) async {
+      await t.runAsync(() => services.engine.createPendingRental(
+            services.db,
+            status: 'Open',
+          ));
+      await pumpApp(t);
+
+      expect(find.textContaining('waiting to sync'), findsOneWidget);
+      expect(find.text('Sync Now'), findsOneWidget);
+    });
+
+    testWidgets('tapping Sync Now on Home assigns the next real number',
+        (t) async {
+      await t.runAsync(() => services.engine.createPendingRental(
+            services.db,
+            status: 'Open',
+          ));
+      await pumpApp(t);
+
+      await tapAndSettle(t, find.text('Sync Now'));
+
+      expect(find.textContaining('waiting to sync'), findsNothing);
+      await t.runAsync(() async {
+        final pending = await services.db.query(
+          'rentals',
+          where: 'rental_no IS NULL AND is_deleted = 0',
+        );
+        expect(pending, isEmpty);
+        final row = await services.db.query(
+          'rentals',
+          where: 'rental_no = ?',
+          whereArgs: [61],
+        );
+        expect(row, hasLength(1));
+      });
+    });
+
+    testWidgets('Sync Now on the rental detail screen resolves that rental',
+        (t) async {
+      late String id;
+      await t.runAsync(() async {
+        id = await services.engine.createPendingRental(
+          services.db,
+          status: 'Open',
+          startDate: '2026-12-31',
+        );
+      });
+
+      await pumpApp(t);
+      await t.scrollUntilVisible(find.textContaining('Pending #').first, 300);
+      await settle(t);
+      await tapAndSettle(t, find.textContaining('Pending #').first);
+      expect(find.text('Sync Now'), findsOneWidget);
+
+      await tapAndSettle(t, find.text('Sync Now'));
+
+      await t.runAsync(() async {
+        final row = await services.rentals.getById(services.db, id);
+        expect(row!['rental_no'], 61);
+      });
+      expect(find.text('#61'), findsOneWidget);
+      expect(find.text('Sync Now'), findsNothing);
+    });
+  });
+
   group('rental numbering rules hold through the UI', () {
     testWidgets('next assigned number is 61 and skips every historical gap',
         (t) async {

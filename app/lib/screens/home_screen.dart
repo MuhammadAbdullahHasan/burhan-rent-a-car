@@ -53,6 +53,27 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  /// Processes the outbox now instead of waiting for a real backend:
+  /// every Pending rental gets the next permanent number, in order.
+  /// Stands in for the future automatic cloud sync (see LocalSyncEngine).
+  Future<void> _syncNow() async {
+    final services = AppScope.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final processed = await services.engine.syncPending(services.db);
+    if (!mounted) return;
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          processed == 0
+              ? 'Nothing to sync.'
+              : '$processed rental${processed == 1 ? '' : 's'} assigned a '
+                  'permanent number.',
+        ),
+      ),
+    );
+    _reload();
+  }
+
   Future<void> _newRental() async {
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const RentalFormScreen()),
@@ -110,19 +131,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         for (final note in data.notifications)
                           _NotificationRow(
                             note: note,
-                            onTap: note.vehicle == null
-                                ? null
-                                : () async {
-                                    await Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => VehicleDetailScreen(
-                                          vehicleId:
-                                              note.vehicle!['id'] as String,
-                                        ),
-                                      ),
-                                    );
-                                    _reload();
-                                  },
+                            onTap: note.isSyncPrompt
+                                ? _syncNow
+                                : note.vehicle == null
+                                    ? null
+                                    : () async {
+                                        await Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => VehicleDetailScreen(
+                                              vehicleId:
+                                                  note.vehicle!['id'] as String,
+                                            ),
+                                          ),
+                                        );
+                                        _reload();
+                                      },
                           ),
                       ],
                     ),
@@ -288,7 +311,12 @@ class _NotificationRow extends StatelessWidget {
       subtitle: Text(note.subtitle, style: theme.textTheme.bodySmall),
       trailing: onTap == null
           ? null
-          : const Icon(Icons.chevron_right, size: 20),
+          : note.isSyncPrompt
+              ? FilledButton.tonal(
+                  onPressed: onTap,
+                  child: const Text('Sync Now'),
+                )
+              : const Icon(Icons.chevron_right, size: 20),
     );
   }
 }
@@ -298,6 +326,7 @@ class _Note {
   final String title;
   final String subtitle;
   final bool urgent;
+  final bool isSyncPrompt;
   final Map<String, Object?>? vehicle;
 
   _Note({
@@ -305,6 +334,7 @@ class _Note {
     required this.title,
     required this.subtitle,
     this.urgent = false,
+    this.isSyncPrompt = false,
     this.vehicle,
   });
 
@@ -354,7 +384,8 @@ class _Dashboard {
       notes.add(_Note(
         icon: Icons.cloud_upload_outlined,
         title: '$pendingSync change${pendingSync == 1 ? '' : 's'} waiting to sync',
-        subtitle: 'Saved on this device. Numbers are assigned when synced.',
+        subtitle: 'Tap Sync Now to assign permanent rental numbers.',
+        isSyncPrompt: true,
       ));
     }
 

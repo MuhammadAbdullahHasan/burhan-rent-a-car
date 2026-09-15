@@ -49,6 +49,30 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
     });
   }
 
+  /// Processes the outbox now instead of waiting for a real backend: this
+  /// rental (and anything else queued) gets the next permanent number, in
+  /// order. Stands in for the future automatic cloud sync.
+  Future<void> _syncNow(Map<String, Object?> rental) async {
+    final services = AppScope.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    await services.engine.syncPending(services.db);
+    if (!mounted) return;
+    final updated = await services.rentals.getById(
+      services.db,
+      rental['id'] as String,
+    );
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          updated != null && !isPendingRental(updated)
+              ? 'Assigned ${rentalDisplayNumber(updated)}.'
+              : 'Synced.',
+        ),
+      ),
+    );
+    _reload();
+  }
+
   Future<void> _closeRental(Map<String, Object?> rental) async {
     final services = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -186,12 +210,23 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                     if (isPendingRental(rental))
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
-                        child: Text(
-                          'Created offline. The permanent rental number is '
-                          'assigned by the backend when this syncs.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.tertiary,
-                          ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Created offline. The permanent rental '
+                                'number is assigned when this syncs.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.tertiary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton.tonal(
+                              onPressed: () => _syncNow(rental),
+                              child: const Text('Sync Now'),
+                            ),
+                          ],
                         ),
                       ),
                     const SizedBox(height: 12),
