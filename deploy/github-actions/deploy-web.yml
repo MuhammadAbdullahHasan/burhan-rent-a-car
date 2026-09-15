@@ -1,0 +1,84 @@
+name: Deploy Flutter Web to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the same Flutter/Dart the project is developed against.
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.27.4
+          channel: stable
+          cache: true
+
+      # Data layer: schema, import pipeline, rental numbering, search.
+      - name: Data layer tests
+        run: |
+          dart pub get
+          dart analyze
+          dart test
+
+      - name: App dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: App analyze and tests
+        working-directory: app
+        run: |
+          flutter analyze
+          flutter test
+
+      # A project site lives at https://<owner>.github.io/<repo>/, so every
+      # asset URL has to be prefixed with /<repo>/. A user/organisation site
+      # (<owner>.github.io) is served from the root instead.
+      - name: Compute base href
+        id: base
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "$REPO_NAME" = "$OWNER.github.io" ]; then
+            echo "href=/" >> "$GITHUB_OUTPUT"
+          else
+            echo "href=/$REPO_NAME/" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Base href: $(tail -n1 "$GITHUB_OUTPUT")"
+
+      - name: Build web (release)
+        working-directory: app
+        run: flutter build web --release --base-href "${{ steps.base.outputs.href }}"
+
+      # GitHub Pages serves 404.html for unknown paths; pointing it at the
+      # app shell lets a deep link or reload inside the app still boot it.
+      - name: SPA fallback
+        run: cp app/build/web/index.html app/build/web/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

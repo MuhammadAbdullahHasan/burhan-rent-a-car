@@ -1,0 +1,27 @@
+name: burhan_rent_a_car_data
+description: >
+  Standalone local data layer (SQLite schema, CSV import pipeline, sync
+  scaffolding) for the Burhan Rent-A-Car app. Pure Dart for now, independent
+  of Flutter/UI and of the backend, so it can be validated against test data
+  before either exists. The CSV column mapping is isolated behind
+  RentalCsvMapper so the real CSV can be supported later by adding one new
+  mapper class, without touching the database or import-pipeline logic.
+publish_to: 'none'
+version: 0.1.0
+
+# Pinned to the newest Dart whose VM still runs on this dev machine's
+# macOS 13 (3.13+ requires macOS 14). Raise this freely when the app is
+# built on a newer machine -- nothing here depends on an old SDK feature.
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dependencies:
+  sqflite_common_ffi: ^2.3.4
+  sqflite_common: ^2.5.4
+  path: ^1.9.0
+  csv: ^6.0.0
+  uuid: ^4.4.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

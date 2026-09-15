@@ -1,0 +1,35 @@
+name: burhan_rent_a_car
+description: Offline-first rental management for Burhan Rent-A-Car.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # The validated data layer, used as-is -- schema, repositories, import
+  # pipeline, rental numbering and search all live there and are covered by
+  # its own test suite.
+  burhan_rent_a_car_data:
+    path: ../
+
+  sqflite: ^2.4.0
+  path: ^1.9.0
+  sqflite_common_ffi_web: ^0.4.5+4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  # Lets widget tests open a real database without a device.
+  sqflite_common_ffi: ^2.3.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    # DEVELOPMENT ONLY: seeds the local database on first launch so there is
+    # realistic data to work against before the real CSV exists.
+    - assets/burhan_rent_a_car_temporary_test.csv
