@@ -6,9 +6,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth_service.dart';
 
-/// Second factor: a 6-digit code emailed to the already-authenticated
-/// user, required before the app unlocks. Sends the code automatically on
-/// first appearance.
+/// Second factor: an email to the already-authenticated user, required
+/// before the app unlocks. Sent automatically on first appearance. The
+/// email carries a link and -- if the project's Magic Link template
+/// includes `{{ .Token }}` -- a 6-digit code. Either works: type the code
+/// here, or click the link, which lands back on the app already verified.
 class OtpVerificationScreen extends StatefulWidget {
   final AuthService authService;
   final String email;
@@ -136,8 +138,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   const SizedBox(height: 8),
                   Text(
                     _sending
-                        ? 'Sending a code to ${widget.email}…'
-                        : 'We sent a 6-digit code to ${widget.email}.',
+                        ? 'Sending an email to ${widget.email}…'
+                        : 'We sent an email to ${widget.email}.\n'
+                            'Enter the 6-digit code from it below — or just '
+                            'click the link in the email.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,

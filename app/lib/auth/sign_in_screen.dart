@@ -21,6 +21,8 @@ class _SignInScreenState extends State<SignInScreen> {
   bool _obscure = true;
   bool _loading = false;
   String? _error;
+  bool _unconfirmed = false;
+  bool _resent = false;
 
   @override
   void dispose() {
@@ -34,18 +36,45 @@ class _SignInScreenState extends State<SignInScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _unconfirmed = false;
+      _resent = false;
     });
     try {
       await widget.authService.signInWithPassword(
         email: _email.text.trim(),
         password: _password.text,
       );
-      // On success, AuthGate's session stream moves the app to the OTP
-      // step on its own -- nothing further to do here.
+      // On success the auth stream in main.dart moves the app to the
+      // second step on its own -- nothing further to do here.
     } on AuthException catch (e) {
-      setState(() => _error = e.message);
+      // Supabase's exact message for an account whose confirmation link was
+      // never clicked. Surfaced specifically, with a way out, because the
+      // generic wording reads like a wrong password.
+      final unconfirmed = e.message.toLowerCase().contains('not confirmed');
+      setState(() {
+        _unconfirmed = unconfirmed;
+        _error = unconfirmed
+            ? 'This email hasn\'t been confirmed yet. Check your inbox '
+                '(and spam) for the confirmation link, or resend it below.'
+            : e.message;
+      });
     } catch (e) {
       setState(() => _error = 'Could not sign in: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _resendConfirmation() async {
+    setState(() => _loading = true);
+    try {
+      await widget.authService.resendConfirmation(_email.text.trim());
+      setState(() {
+        _resent = true;
+        _error = 'Confirmation email sent again to ${_email.text.trim()}.';
+      });
+    } on AuthException catch (e) {
+      setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -94,11 +123,27 @@ class _SignInScreenState extends State<SignInScreen> {
                           color: theme.colorScheme.errorContainer,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Text(
-                          _error!,
-                          style: TextStyle(
-                            color: theme.colorScheme.onErrorContainer,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _error!,
+                              style: TextStyle(
+                                color: theme.colorScheme.onErrorContainer,
+                              ),
+                            ),
+                            if (_unconfirmed && !_resent)
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed:
+                                      _loading ? null : _resendConfirmation,
+                                  child: const Text(
+                                    'Resend confirmation email',
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 16),

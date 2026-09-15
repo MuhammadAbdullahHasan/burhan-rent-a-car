@@ -1,16 +1,24 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Thin wrapper around Supabase Auth plus the app-level email-OTP second
-/// factor.
+/// Thin wrapper around Supabase Auth plus the app-level email second factor.
 ///
 /// Supabase's own MFA API only supports TOTP (authenticator app) and phone
-/// factors, not email -- so "email OTP as a second step" is implemented at
-/// the app layer instead: after a password sign-in succeeds (which already
-/// establishes a valid Supabase session), [sendOtp]/[verifyOtp] run a
-/// second, independent passwordless email challenge against the same
-/// address before the app is unlocked. [isMfaVerified] gates that, tracked
-/// per signed-in user and cleared on sign-out.
+/// factors, not email -- so "email as a second step" is implemented at the
+/// app layer: after a password sign-in succeeds (which already establishes
+/// a Supabase session), the app stays locked until the user proves access
+/// to their inbox. That proof is accepted in EITHER of two forms, because
+/// which one arrives depends on the project's email template:
+///
+///  * typing the 6-digit code from the email ([verifyOtp]) -- only present
+///    if the Magic Link template includes `{{ .Token }}`; or
+///  * clicking the link in the email, which lands back on the app with a
+///    session in the URL ([markMfaVerified], called by the app on such a
+///    landing). Clicking a link that only the inbox owner could have
+///    received proves exactly what typing the code does.
+///
+/// [isMfaVerified] gates the app on that, tracked per signed-in user in
+/// platform secure storage and cleared on sign-out.
 class AuthService {
   final SupabaseClient? _clientOverride;
   final FlutterSecureStorage _storage;
@@ -37,7 +45,7 @@ class AuthService {
     return (await _storage.read(key: _mfaKey(userId))) == 'true';
   }
 
-  Future<void> _markMfaVerified(String userId) async {
+  Future<void> markMfaVerified(String userId) async {
     await _storage.write(key: _mfaKey(userId), value: 'true');
   }
 
@@ -55,14 +63,25 @@ class AuthService {
     return _auth.signUp(email: email, password: password);
   }
 
+  /// Re-sends the sign-up confirmation email for an account that exists but
+  /// hasn't clicked its link yet -- the failure mode behind "Email not
+  /// confirmed" on sign-in.
+  Future<void> resendConfirmation(String email) {
+    return _auth.resend(type: OtpType.signup, email: email);
+  }
+
   Future<void> sendPasswordResetEmail(String email) {
     return _auth.resetPasswordForEmail(email);
   }
 
-  /// Sends the second-factor code to the already-authenticated user's own
-  /// email address. Deliberately ignores [email] as a free-typed value --
-  /// it always targets [currentUser]'s address, so the code can never be
-  /// sent somewhere else.
+  /// Sets a new password for the currently signed-in user -- used after a
+  /// recovery link has landed the user back in the app.
+  Future<void> updatePassword(String newPassword) {
+    return _auth.updateUser(UserAttributes(password: newPassword));
+  }
+
+  /// Sends the second-step email to the already-authenticated user's own
+  /// address. Never takes a free-typed address, so it can't be redirected.
   Future<void> sendOtp() async {
     final email = currentUser?.email;
     if (email == null) {
@@ -78,7 +97,7 @@ class AuthService {
     }
     await _auth.verifyOTP(type: OtpType.email, email: email, token: code);
     final userId = currentUser?.id;
-    if (userId != null) await _markMfaVerified(userId);
+    if (userId != null) await markMfaVerified(userId);
   }
 
   Future<void> signOut() async {
