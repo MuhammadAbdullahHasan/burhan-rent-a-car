@@ -23,6 +23,12 @@ Future<void> main() async {
   await Supabase.initialize(
     url: supabaseUrl,
     publishableKey: supabasePublishableKey,
+    // The session is held in memory only, never written to device storage,
+    // so every fresh launch starts signed out and asks for the password.
+    // (Default behaviour would silently restore the last session.)
+    authOptions: const FlutterAuthClientOptions(
+      localStorage: EmptyLocalStorage(),
+    ),
   );
   runApp(const BurhanApp());
 }
