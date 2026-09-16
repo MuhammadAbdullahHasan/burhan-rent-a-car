@@ -32,6 +32,15 @@ android {
         versionName = flutter.versionName
     }
 
+    packagingOptions {
+        jniLibs {
+            // With minSdk >= 23 AGP stores native libraries uncompressed
+            // (faster install, larger file). This APK is downloaded over
+            // mobile data, so keep them compressed: ~25MB instead of ~57MB.
+            useLegacyPackaging = true
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
