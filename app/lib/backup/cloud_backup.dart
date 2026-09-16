@@ -40,8 +40,8 @@ class CloudBackup {
     final snapshot = await exportSnapshot(db, includeAttachments: false);
     final bytes = await BackupCodec.encodeSnapshot(snapshot);
     final stamp = DateTime.now().toUtc();
-    final name =
-        'backup-${stamp.toIso8601String().replaceAll(':', '-')}.json.gz';
+    // One object per calendar day, whichever device makes it.
+    final name = 'backup-${stamp.toIso8601String().substring(0, 10)}.json.gz';
     await client.storage.from(_bucket).uploadBinary(
           '$_folder/$name',
           bytes,
