@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""One-time bulk load of an imported dataset into the Supabase project.
+
+This is the "bulk load directly against Postgres" path of the locked spec
+(section 7): run the Dart import pipeline into a SQLite file first, then
+push every customer, vehicle and rental from that file to the cloud as the
+owner. Devices never seed themselves; they pull from here.
+
+    dart run bin/import_report.dart <csv> build/dataset.db
+    SUPABASE_EMAIL=... SUPABASE_PASSWORD=... \\
+        python3 deploy/load_dataset_to_cloud.py build/dataset.db
+
+Refuses to run if the cloud already holds any rental, so it can never
+overwrite real records. Credentials come from the environment only.
+"""
+import json
+import os
+import sqlite3
+import sys
+import urllib.error
+import urllib.request
+
+URL = "https://qaezjbadebwonreoggds.supabase.co"
+KEY = "sb_publishable__fTN9ntFwaCAFSt83Zj0XQ_qT-HDmFW"  # client-safe publishable key
+BATCH = 200
+
+
+def call(method, path, body=None, token=None, prefer=None):
+    req = urllib.request.Request(URL + path, method=method)
+    req.add_header("apikey", KEY)
+    req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    if prefer:
+        req.add_header("Prefer", prefer)
+    data = json.dumps(body).encode() if body is not None else None
+    try:
+        with urllib.request.urlopen(req, data) as resp:
+            raw = resp.read()
+            return resp.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode(errors="replace")
+        sys.exit(f"{method} {path} -> {e.code}: {raw}")
+
+
+def as_bool(v):
+    return v == 1
+
+
+def rows(db, table):
+    cur = db.execute(f"select * from {table}")
+    cols = [c[0] for c in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    email = os.environ.get("SUPABASE_EMAIL")
+    password = os.environ.get("SUPABASE_PASSWORD")
+    if not email or not password:
+        sys.exit("Set SUPABASE_EMAIL and SUPABASE_PASSWORD in the environment.")
+
+    db = sqlite3.connect(sys.argv[1])
+    customers = rows(db, "customers")
+    vehicles = rows(db, "vehicles")
+    rentals = rows(db, "rentals")
+    for r in customers:
+        r["possible_duplicate"] = as_bool(r["possible_duplicate"])
+        r["is_deleted"] = as_bool(r["is_deleted"])
+    for r in vehicles:
+        r["is_deleted"] = as_bool(r["is_deleted"])
+    for r in rentals:
+        r["is_placeholder"] = as_bool(r["is_placeholder"])
+        r["is_deleted"] = as_bool(r["is_deleted"])
+
+    _, auth = call("POST", "/auth/v1/token?grant_type=password",
+                   {"email": email, "password": password})
+    token = auth["access_token"]
+
+    _, existing = call("GET", "/rest/v1/rentals?select=id&limit=1", token=token)
+    if existing:
+        sys.exit("The cloud already holds rentals; refusing to bulk-load over them.")
+
+    for table, data in (("customers", customers), ("vehicles", vehicles),
+                        ("rentals", rentals)):
+        for i in range(0, len(data), BATCH):
+            call("POST", f"/rest/v1/{table}", data[i:i + BATCH], token=token,
+                 prefer="resolution=merge-duplicates,return=minimal")
+        print(f"{table}: {len(data)} rows loaded")
+
+    _, check = call("GET", "/rest/v1/rentals?select=rental_no&order=rental_no.desc&limit=1",
+                    token=token)
+    print(f"highest rental number on the server: #{check[0]['rental_no']}")
+
+
+if __name__ == "__main__":
+    main()

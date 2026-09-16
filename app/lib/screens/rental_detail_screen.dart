@@ -123,9 +123,6 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
     });
   }
 
-  /// Processes the outbox now instead of waiting for a real backend: this
-  /// rental (and anything else queued) gets the next permanent number, in
-  /// order. Stands in for the future automatic cloud sync.
   Future<void> _syncNow(Map<String, Object?> rental) async {
     final services = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);

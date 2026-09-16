@@ -4,7 +4,6 @@ import 'auth/biometric_service.dart';
 import 'sync/cloud_sync_engine.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' as sqflite;
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
@@ -37,6 +36,10 @@ class AppServices {
   /// when this is null, so screens never need to check it themselves.
   CloudSyncEngine? cloudSync;
 
+  /// Bumped after any sync that changed local rows, so open screens can
+  /// reload without the owner having to navigate away and back.
+  final ValueNotifier<int> dataChanged = ValueNotifier<int>(0);
+
   AppServices._(this.db)
       : customers = CustomerRepository(),
         vehicles = VehicleRepository(),
@@ -45,8 +48,9 @@ class AppServices {
         search = UniversalSearchService(),
         engine = LocalSyncEngine();
 
-  /// Opens the local database, seeding it from the bundled temporary CSV
-  /// the first time so there is realistic data to develop against.
+  /// Opens the local database. It starts empty on a new device and is
+  /// filled by the first cloud sync (see CloudSyncEngine); nothing is ever
+  /// seeded locally, so every device works from the same records.
   ///
   /// The storage backend differs per platform, but nothing above this line
   /// does: Android uses `sqflite`, and the browser (used for local
@@ -67,28 +71,12 @@ class AppServices {
       );
       db = await openAppDatabase(sqflite.databaseFactory, path);
     }
-    await seedIfEmpty(db);
     return AppServices._(db);
   }
 
   /// Wraps an already-open database (used by widget tests, which supply an
   /// FFI-backed one).
   static AppServices forDatabase(Database db) => AppServices._(db);
-
-  /// DEVELOPMENT SEEDING ONLY. Loads the temporary test CSV so the app has
-  /// data to show before the real CSV exists. Delete this once the real
-  /// historical import runs against the backend -- it is not a production
-  /// code path, and it deliberately does nothing if any rental already
-  /// exists, so it can never overwrite real records.
-  static Future<void> seedIfEmpty(Database db) async {
-    final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM rentals');
-    if ((rows.first['c'] as int? ?? 0) > 0) return;
-
-    final csv = await rootBundle.loadString(
-      'assets/burhan_rent_a_car_temporary_test.csv',
-    );
-    await ImportPipeline(mapper: TestCsvMapper()).importCsvString(db, csv);
-  }
 }
 
 /// Simple dependency lookup. A single owner on a single device doesn't need

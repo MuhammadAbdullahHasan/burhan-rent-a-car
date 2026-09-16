@@ -2,6 +2,7 @@ import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 
 import '../app_services.dart';
+import '../sync/cloud_sync_engine.dart';
 import '../sync/sync_actions.dart';
 import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
@@ -20,11 +21,23 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late Future<_Dashboard> _future;
+  ValueNotifier<int>? _dataChanged;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _future = _load();
+    final notifier = AppScope.of(context).dataChanged;
+    if (!identical(notifier, _dataChanged)) {
+      _dataChanged?.removeListener(_reload);
+      _dataChanged = notifier..addListener(_reload);
+    }
+  }
+
+  @override
+  void dispose() {
+    _dataChanged?.removeListener(_reload);
+    super.dispose();
   }
 
   Future<_Dashboard> _load() async {
@@ -39,6 +52,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       recent: await services.rentals.recent(db, limit: 5),
       insuranceDue: await services.vehicles.insuranceDue(db, withinDays: 60),
+      awaitingFirstDownload:
+          services.cloudSync != null && !await CloudSyncEngine.isHydrated(db),
       pendingSync: (await db
               .rawQuery(
                 "SELECT COUNT(*) AS c FROM sync_queue WHERE status = 'pending'",
@@ -57,9 +72,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  /// Processes the outbox now instead of waiting for a real backend:
-  /// every Pending rental gets the next permanent number, in order.
-  /// Stands in for the future automatic cloud sync (see LocalSyncEngine).
   Future<void> _syncNow() async {
     final services = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -206,9 +218,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 SectionCard(
                   title: 'RECENT RENTALS',
                   child: data.recent.isEmpty
-                      ? const EmptyState(
-                          icon: Icons.history,
-                          message: 'No rentals recorded yet.',
+                      ? EmptyState(
+                          icon: data.awaitingFirstDownload
+                              ? Icons.cloud_download_outlined
+                              : Icons.history,
+                          message: data.awaitingFirstDownload
+                              ? 'Downloading your records from the cloud… '
+                                  'If this takes long, check the internet '
+                                  'connection and tap Sync Now.'
+                              : 'No rentals recorded yet.',
                         )
                       : Column(
                           children: [
@@ -467,6 +485,7 @@ class _Dashboard {
   final List<Map<String, Object?>> recent;
   final List<Map<String, Object?>> insuranceDue;
   final int pendingSync;
+  final bool awaitingFirstDownload;
 
   _Dashboard({
     required this.unclosed,
@@ -474,6 +493,7 @@ class _Dashboard {
     required this.recent,
     required this.insuranceDue,
     required this.pendingSync,
+    this.awaitingFirstDownload = false,
   });
 
   /// Only things the data can actually support: insurance dates that are
@@ -504,7 +524,7 @@ class _Dashboard {
         icon: Icons.cloud_upload_outlined,
         title:
             '$pendingSync change${pendingSync == 1 ? '' : 's'} waiting to sync',
-        subtitle: 'Tap Sync Now to assign permanent rental numbers.',
+        subtitle: 'Tap Sync Now to send them to the cloud.',
         isSyncPrompt: true,
       ));
     }

@@ -16,6 +16,7 @@ import 'auth/set_new_password_screen.dart';
 import 'auth/sign_in_screen.dart';
 import 'screens/shell_screen.dart';
 import 'sync/cloud_sync_engine.dart';
+import 'sync/sync_actions.dart';
 import 'supabase_config.dart';
 import 'theme.dart';
 
@@ -128,10 +129,10 @@ class _BurhanAppState extends State<BurhanApp> {
       db: services.db,
     );
     services.cloudSync = engine;
-    engine.syncNow();
+    runSync(services);
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
       if (results.any((r) => r != ConnectivityResult.none)) {
-        engine.syncNow();
+        runSync(services);
       }
     });
   }

@@ -35,7 +35,7 @@ class Outbox {
     return db.query(
       'sync_queue',
       where: "status = 'pending'",
-      orderBy: 'created_at ASC',
+      orderBy: 'created_at ASC, rowid ASC',
     );
   }
 

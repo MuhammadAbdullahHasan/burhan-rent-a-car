@@ -18,11 +18,23 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   late Future<List<Map<String, Object?>>> _future;
+  ValueNotifier<int>? _dataChanged;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _future = _load();
+    final notifier = AppScope.of(context).dataChanged;
+    if (!identical(notifier, _dataChanged)) {
+      _dataChanged?.removeListener(_reload);
+      _dataChanged = notifier..addListener(_reload);
+    }
+  }
+
+  @override
+  void dispose() {
+    _dataChanged?.removeListener(_reload);
+    super.dispose();
   }
 
   Future<List<Map<String, Object?>>> _load() {
