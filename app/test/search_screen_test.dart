@@ -7,8 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers.dart';
 
-/// Categorised search: one field per identifier, each searching only its
-/// own category.
+/// One search bar; the selected chip decides which category the text
+/// searches. Recent searches are kept on the device.
 void main() {
   late Directory tempDir;
   late AppServices services;
@@ -29,17 +29,23 @@ void main() {
     await goToTab(t, 'Search');
   }
 
-  testWidgets('shows one field per category', (t) async {
+  testWidgets('shows one search bar and a chip per category', (t) async {
     await pumpSearch(t);
-    for (final label in [
-      'Rental number',
-      'Customer name',
-      'Mobile number',
+    expect(find.byKey(const Key('search_field')), findsOneWidget);
+    for (final chip in [
+      'Rental #',
+      'Customer',
+      'Mobile',
       'CNIC',
-      'Vehicle registration',
+      'Vehicle Reg'
     ]) {
-      expect(find.widgetWithText(TextField, label), findsOneWidget);
+      expect(
+        find.descendant(of: find.byType(ChoiceChip), matching: find.text(chip)),
+        findsOneWidget,
+      );
     }
+    expect(find.text('No Recent Searches\nEnter a rental number above'),
+        findsOneWidget);
   });
 
   testWidgets('rental number field finds only that rental', (t) async {
@@ -56,7 +62,13 @@ void main() {
     // "1" would be rental #1 in the number field; here it is phone digits.
     await searchFor(t, '03001234567', field: 'Mobile number');
     expect(find.text('Billa Khan'), findsOneWidget);
-    expect(find.textContaining('Rental #'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(ListTile),
+        matching: find.textContaining('Rental #'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets('customer name field matches partial names', (t) async {
@@ -80,20 +92,35 @@ void main() {
     expect(find.text('EXACT MATCH'), findsOneWidget);
   });
 
-  testWidgets('typing in a second field clears the first', (t) async {
+  testWidgets('switching the chip re-runs the same text in the new category',
+      (t) async {
     await pumpSearch(t);
-    await searchFor(t, '23', field: 'Rental number');
-    expect(find.text('Rental #23'), findsOneWidget);
+    await searchFor(t, '1', field: 'Rental #');
+    expect(find.text('Rental #1'), findsOneWidget);
+    expect(find.text('Billa Khan'), findsNothing);
 
-    await searchFor(t, 'Billa', field: 'Customer name');
-    expect(find.text('Billa Khan'), findsOneWidget);
-    expect(find.text('Rental #23'), findsNothing);
-    expect(
-      t.widget<TextField>(find.widgetWithText(TextField, 'Rental number'))
-          .controller!
-          .text,
-      isEmpty,
+    // Same "1" as mobile digits: the rental is gone, phone matches appear.
+    await tapAndSettle(
+      t,
+      find.descendant(
+          of: find.byType(ChoiceChip), matching: find.text('Mobile')),
     );
+    expect(find.text('Rental #1'), findsNothing);
+    expect(find.text('Billa Khan'), findsOneWidget);
+  });
+
+  testWidgets('submitted searches are remembered and can be re-run', (t) async {
+    await pumpSearch(t);
+    await searchFor(t, 'Billa', field: 'Customer');
+    await t.testTextInput.receiveAction(TextInputAction.done);
+    await settle(t);
+
+    // Clearing the bar shows the history; tapping an entry re-runs it.
+    await tapAndSettle(t, find.byTooltip('Clear'));
+    expect(find.text('RECENT SEARCHES'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Billa'), findsOneWidget);
+    await tapAndSettle(t, find.widgetWithText(ListTile, 'Billa'));
+    expect(find.text('Billa Khan'), findsOneWidget);
   });
 
   testWidgets('no match shows a category-specific message', (t) async {

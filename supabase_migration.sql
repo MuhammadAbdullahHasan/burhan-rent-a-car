@@ -254,3 +254,17 @@ create policy "owner manages own backups" on storage.objects
   for all to authenticated
   using (bucket_id = 'backups' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'backups' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ---------------------------------------------------------------------------
+-- Hardening after the advisor pass.
+-- ---------------------------------------------------------------------------
+-- Trigger functions are never meant to be called over the API.
+revoke execute on function public.log_audit() from public, anon, authenticated;
+revoke execute on function public.touch_synced_at() from public, anon, authenticated;
+alter function public.touch_synced_at() set search_path = public;
+
+-- RLS: (select auth.uid()) is evaluated once per statement instead of once
+-- per row. Every policy above is defined this way on the live project:
+--   using (owner_id = (select auth.uid()))
+--   with check (owner_id = (select auth.uid()))
+create index idx_audit_actor on audit_log(actor);

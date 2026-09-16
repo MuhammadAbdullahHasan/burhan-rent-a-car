@@ -61,14 +61,25 @@ Future<void> searchFor(
   String query, {
   String? field,
 }) async {
-  if (find.widgetWithText(TextField, 'Rental number').evaluate().isEmpty) {
+  final bar = find.byKey(const Key('search_field'));
+  if (bar.evaluate().isEmpty) {
     await goToTab(tester, 'Search');
   }
-  final label = field ??
-      (RegExp(r'^\d+$').hasMatch(query.trim())
-          ? 'Rental number'
-          : 'Customer name');
-  await tester.enterText(find.widgetWithText(TextField, label), query);
+  // Older call sites name the category the way the previous layout
+  // labelled its fields; map those onto the chips.
+  final chip = switch (field) {
+    'Rental number' || 'Rental #' => 'Rental #',
+    'Customer name' || 'Customer' => 'Customer',
+    'Mobile number' || 'Mobile' => 'Mobile',
+    'CNIC' => 'CNIC',
+    'Vehicle registration' || 'Vehicle Reg' => 'Vehicle Reg',
+    _ => RegExp(r'^\d+$').hasMatch(query.trim()) ? 'Rental #' : 'Customer',
+  };
+  await tapAndSettle(
+    tester,
+    find.descendant(of: find.byType(ChoiceChip), matching: find.text(chip)),
+  );
+  await tester.enterText(bar, query);
   await settle(tester);
 }
 
