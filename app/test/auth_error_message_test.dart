@@ -27,14 +27,6 @@ void main() {
     );
   });
 
-  test('bad authenticator code is explained', () {
-    expect(
-      authErrorMessage(const AuthException('Invalid TOTP code entered'),
-          fallback: 'x'),
-      contains('incorrect or has expired'),
-    );
-  });
-
   test('network failures on either platform become one plain sentence', () {
     for (final raw in [
       'ClientException with SocketException: Failed host lookup: x',

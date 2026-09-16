@@ -45,7 +45,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
       if (mounted) setState(() => _done = true);
     } catch (e) {
-      setState(() => _error = authErrorMessage(e, fallback: 'Could not create the account.'));
+      setState(() => _error =
+          authErrorMessage(e, fallback: 'Could not create the account.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

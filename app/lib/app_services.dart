@@ -20,6 +20,10 @@ class AppServices {
   final UniversalSearchService search;
   final LocalSyncEngine engine;
 
+  /// Signs the owner out. Null when there is no auth layer (widget tests
+  /// inject services directly), in which case the UI hides the action.
+  Future<void> Function()? signOut;
+
   AppServices._(this.db)
       : customers = CustomerRepository(),
         vehicles = VehicleRepository(),

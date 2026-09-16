@@ -74,6 +74,32 @@ class _HomeScreenState extends State<HomeScreen> {
     _reload();
   }
 
+  Future<void> _signOut() async {
+    final signOut = AppScope.of(context).signOut;
+    if (signOut == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'Your data stays on this device. You\'ll need your email and '
+          'password to sign back in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await signOut();
+  }
+
   Future<void> _newRental() async {
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const RentalFormScreen()),
@@ -93,6 +119,12 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: _reload,
             icon: const Icon(Icons.refresh),
           ),
+          if (AppScope.of(context).signOut != null)
+            IconButton(
+              tooltip: 'Sign out',
+              onPressed: _signOut,
+              icon: const Icon(Icons.logout),
+            ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

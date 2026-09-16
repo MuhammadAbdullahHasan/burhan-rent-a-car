@@ -24,9 +24,6 @@ String authErrorMessage(Object error, {required String fallback}) {
     if (msg.contains('password') && msg.contains('at least')) {
       return 'Password is too short.';
     }
-    if (msg.contains('invalid totp') || msg.contains('invalid code')) {
-      return 'That code is incorrect or has expired. Enter the current one.';
-    }
     if (msg.contains('user not found')) {
       return 'No account exists for this email.';
     }

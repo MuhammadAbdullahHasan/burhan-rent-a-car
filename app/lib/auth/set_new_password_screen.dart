@@ -43,7 +43,8 @@ class _SetNewPasswordScreenState extends State<SetNewPasswordScreen> {
       await widget.authService.updatePassword(_password.text);
       widget.onDone();
     } catch (e) {
-      setState(() => _error = authErrorMessage(e, fallback: 'Could not update the password.'));
+      setState(() => _error =
+          authErrorMessage(e, fallback: 'Could not update the password.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

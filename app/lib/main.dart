@@ -5,8 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_services.dart';
 import 'auth/auth_service.dart';
 import 'auth/email_link_landing.dart';
-import 'auth/mfa_challenge_screen.dart';
-import 'auth/mfa_enroll_screen.dart';
 import 'auth/set_new_password_screen.dart';
 import 'auth/sign_in_screen.dart';
 import 'screens/shell_screen.dart';
@@ -31,8 +29,8 @@ Future<void> main() async {
 
 class BurhanApp extends StatefulWidget {
   /// Tests inject an already-open (FFI) database *and* skip auth entirely
-  /// -- production (this field null) requires sign-in + an authenticator
-  /// code before opening the on-device database.
+  /// -- production (this field null) requires email + password sign-in
+  /// before opening the on-device database.
   final AppServices? services;
 
   const BurhanApp({super.key, this.services});
@@ -53,27 +51,14 @@ class _BurhanAppState extends State<BurhanApp> {
   bool _landingHandled = false;
   bool _needsNewPassword = false;
 
-  /// Bumped after enrolment/verification so the MFA check below re-runs.
-  int _mfaRevision = 0;
-
   /// Only a recovery link changes the flow: it routes to the
-  /// set-new-password screen. Confirmation links just land signed-in, and
-  /// the authenticator step still applies.
+  /// set-new-password screen. Confirmation links just land signed-in.
   void _handleEmailLanding() {
     if (_landingHandled) return;
     _landingHandled = true;
     if (_openedFromEmailLink == EmailLinkType.recovery) {
       _needsNewPassword = true;
     }
-  }
-
-  Future<_MfaState> _loadMfaState() async {
-    final factor = await _authService.verifiedTotpFactor();
-    if (factor == null) return const _MfaState.needsEnrollment();
-    final verified = _authService.isFullyVerified();
-    return verified
-        ? const _MfaState.verified()
-        : _MfaState.needsChallenge(factor.id);
   }
 
   /// Every branch below returns its OWN complete `MaterialApp` (or, once
@@ -106,8 +91,7 @@ class _BurhanAppState extends State<BurhanApp> {
         _authService.currentSession,
       ),
       builder: (context, snapshot) {
-        final session =
-            snapshot.data?.session ?? _authService.currentSession;
+        final session = snapshot.data?.session ?? _authService.currentSession;
         final user = session?.user;
 
         if (user == null) {
@@ -129,67 +113,30 @@ class _BurhanAppState extends State<BurhanApp> {
           );
         }
 
-        return FutureBuilder<_MfaState>(
-          key: ValueKey('mfa-${user.id}-$_mfaRevision'),
-          future: _loadMfaState(),
-          builder: (context, mfaSnapshot) {
-            if (mfaSnapshot.hasError) {
+        _servicesFuture ??= AppServices.bootstrap();
+        return FutureBuilder<AppServices>(
+          future: _servicesFuture,
+          builder: (context, svcSnapshot) {
+            if (svcSnapshot.hasError) {
               return _bareApp(
                 theme,
                 _ErrorMessage(
-                  'Could not check sign-in status:\n${mfaSnapshot.error}',
+                  'Could not open the database:\n${svcSnapshot.error}',
                 ),
               );
             }
-            final mfa = mfaSnapshot.data;
-            if (mfa == null) {
+            if (!svcSnapshot.hasData) {
               return _bareApp(theme, const _Loading());
             }
-            if (mfa.needsEnrollment) {
-              return _bareApp(
-                theme,
-                MfaEnrollScreen(
-                  authService: _authService,
-                  onEnrolled: () => setState(() => _mfaRevision++),
-                ),
-              );
-            }
-            if (mfa.challengeFactorId != null) {
-              return _bareApp(
-                theme,
-                MfaChallengeScreen(
-                  authService: _authService,
-                  factorId: mfa.challengeFactorId!,
-                  onVerified: () => setState(() => _mfaRevision++),
-                ),
-              );
-            }
-
-            _servicesFuture ??= AppServices.bootstrap();
-            return FutureBuilder<AppServices>(
-              future: _servicesFuture,
-              builder: (context, svcSnapshot) {
-                if (svcSnapshot.hasError) {
-                  return _bareApp(
-                    theme,
-                    _ErrorMessage(
-                      'Could not open the database:\n${svcSnapshot.error}',
-                    ),
-                  );
-                }
-                if (!svcSnapshot.hasData) {
-                  return _bareApp(theme, const _Loading());
-                }
-                return AppScope(
-                  services: svcSnapshot.data!,
-                  child: MaterialApp(
-                    title: 'Burhan Rent-A-Car',
-                    debugShowCheckedModeBanner: false,
-                    theme: theme,
-                    home: const ShellScreen(),
-                  ),
-                );
-              },
+            svcSnapshot.data!.signOut = _authService.signOut;
+            return AppScope(
+              services: svcSnapshot.data!,
+              child: MaterialApp(
+                title: 'Burhan Rent-A-Car',
+                debugShowCheckedModeBanner: false,
+                theme: theme,
+                home: const ShellScreen(),
+              ),
             );
           },
         );
@@ -205,22 +152,6 @@ class _BurhanAppState extends State<BurhanApp> {
       home: home,
     );
   }
-}
-
-/// Where the signed-in user is relative to the authenticator step.
-class _MfaState {
-  final bool needsEnrollment;
-  final String? challengeFactorId;
-
-  const _MfaState.needsEnrollment()
-      : needsEnrollment = true,
-        challengeFactorId = null;
-  const _MfaState.needsChallenge(String factorId)
-      : needsEnrollment = false,
-        challengeFactorId = factorId;
-  const _MfaState.verified()
-      : needsEnrollment = false,
-        challengeFactorId = null;
 }
 
 class _Loading extends StatelessWidget {

@@ -34,7 +34,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       await widget.authService.sendPasswordResetEmail(_email.text.trim());
       if (mounted) setState(() => _sent = true);
     } catch (e) {
-      setState(() => _error = authErrorMessage(e, fallback: 'Could not send the reset email.'));
+      setState(() => _error =
+          authErrorMessage(e, fallback: 'Could not send the reset email.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
