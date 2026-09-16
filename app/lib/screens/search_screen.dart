@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../app_services.dart';
 import '../widgets/common.dart';
+import '../widgets/showroom_scaffold.dart';
 import 'customer_detail_screen.dart';
 import 'rental_detail_screen.dart';
 import 'vehicle_detail_screen.dart';
@@ -263,8 +264,8 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Search Records')),
+    return ShowroomScaffold(
+      title: 'Search Records',
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [

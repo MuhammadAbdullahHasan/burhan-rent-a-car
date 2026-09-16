@@ -8,6 +8,7 @@ import '../widgets/sync_status_bar.dart';
 import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
 import '../widgets/rental_tile.dart';
+import '../widgets/showroom_scaffold.dart';
 import 'rental_detail_screen.dart';
 import 'rental_form_screen.dart';
 import 'backup_screen.dart';
@@ -140,23 +141,21 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Burhan Rent-A-Car'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _reload,
-            icon: const Icon(Icons.refresh),
+    return ShowroomScaffold(
+      title: 'Burhan Rent-A-Car',
+      actions: [
+        IconButton(
+          tooltip: 'Refresh',
+          onPressed: _reload,
+          icon: const Icon(Icons.refresh),
+        ),
+        if (AppScope.of(context).signOut != null)
+          _AccountMenu(
+            biometrics: AppScope.of(context).biometrics,
+            onSignOut: _signOut,
+            onBackup: _openBackup,
           ),
-          if (AppScope.of(context).signOut != null)
-            _AccountMenu(
-              biometrics: AppScope.of(context).biometrics,
-              onSignOut: _signOut,
-              onBackup: _openBackup,
-            ),
-        ],
-      ),
+      ],
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _newRental,
         icon: const Icon(Icons.add),

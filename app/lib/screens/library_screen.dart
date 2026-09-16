@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_services.dart';
 import '../widgets/common.dart';
+import '../widgets/showroom_scaffold.dart';
 import 'vehicle_detail_screen.dart';
 import 'vehicle_form_screen.dart';
 
@@ -57,17 +58,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Vehicle Inventory'),
-        actions: [
-          IconButton(
-            tooltip: 'Add vehicle',
-            onPressed: _addVehicle,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
+    return ShowroomScaffold(
+      title: 'Vehicle Inventory',
+      actions: [
+        IconButton(
+          tooltip: 'Add vehicle',
+          onPressed: _addVehicle,
+          icon: const Icon(Icons.add),
+        ),
+      ],
       body: RefreshIndicator(
         onRefresh: () async => _reload(),
         child: AsyncList<Map<String, Object?>>(
