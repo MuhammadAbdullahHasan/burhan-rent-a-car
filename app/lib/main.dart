@@ -149,9 +149,12 @@ class _BurhanAppState extends State<BurhanApp> {
         services.syncStatus.value = services.syncStatus.value.copyWith(
           phase: summary.hasError ? SyncPhase.error : SyncPhase.idle,
           lastSuccess: summary.hasError ? null : DateTime.now(),
-          message:
-              summary.error == null ? null : friendlySyncError(summary.error!),
-          clearMessage: !summary.hasError,
+          message: summary.error != null
+              ? friendlySyncError(summary.error!)
+              : summary.notices.isEmpty
+                  ? null
+                  : summary.notices.join(' '),
+          clearMessage: !summary.hasError && summary.notices.isEmpty,
         );
     engine.onPass = _withDataChanged(services, engine.onPass!);
     _cloudEngine = engine;

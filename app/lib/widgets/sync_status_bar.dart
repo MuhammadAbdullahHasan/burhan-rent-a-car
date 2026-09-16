@@ -64,6 +64,9 @@ class SyncStatusBar extends StatelessWidget {
     }
     final when = s.lastSuccess == null ? 'not yet' : _ago(s.lastSuccess!);
     final waiting = s.pending > 0 ? ' · ${s.pending} waiting' : '';
+    if (s.message != null) {
+      return (Icons.info_outline, s.message!, theme.colorScheme.tertiary);
+    }
     if (s.live) {
       return (Icons.cloud_done_outlined, 'Live · synced $when$waiting', muted);
     }

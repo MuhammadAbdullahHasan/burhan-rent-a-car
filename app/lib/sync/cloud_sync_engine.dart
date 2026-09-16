@@ -15,12 +15,17 @@ class SyncSummary {
   final int conflicts;
   final String? error;
 
+  /// Things the owner should know that are not failures -- e.g. a rental
+  /// whose vehicle link could not be recovered and needs setting again.
+  final List<String> notices;
+
   const SyncSummary({
     required this.pushed,
     required this.pulled,
     this.failed = 0,
     this.conflicts = 0,
     this.error,
+    this.notices = const [],
   });
 
   bool get hasError => error != null || failed > 0;
@@ -179,6 +184,7 @@ class CloudSyncEngine {
     var pushed = 0;
     var failed = 0;
     var conflicts = 0;
+    var notices = const <String>[];
     String? error;
     try {
       final result = await _push();
@@ -186,6 +192,7 @@ class CloudSyncEngine {
       failed = result.failed;
       conflicts = result.conflicts;
       error = result.firstError;
+      notices = result.notices;
     } catch (e) {
       error = e.toString();
     }
@@ -201,6 +208,7 @@ class CloudSyncEngine {
       failed: failed,
       conflicts: conflicts,
       error: error,
+      notices: notices,
     );
     onPass?.call(summary);
     return summary;
@@ -213,6 +221,7 @@ class CloudSyncEngine {
     var failed = 0;
     var conflicts = 0;
     String? firstError;
+    _notices = [];
 
     // Parents before children, otherwise in the order things happened:
     // every customer/vehicle a rental needs was created before it, and an
@@ -274,7 +283,7 @@ class CloudSyncEngine {
         await _outbox.markFailed(db, id, e.toString());
       }
     }
-    return _PushResult(pushed, failed, conflicts, firstError);
+    return _PushResult(pushed, failed, conflicts, firstError, _notices);
   }
 
   /// Creates (and restore fills) go up as upserts. `restore` never
@@ -294,7 +303,8 @@ class CloudSyncEngine {
     if (entityType == 'rental') {
       // Numbers first (one atomic server call each), then one upsert.
       final numbered = <Map<String, Object?>>[];
-      for (final row in rows) {
+      for (final raw in rows) {
+        final row = await _healLinks(raw);
         numbered.add(row['rental_no'] == null
             ? {...row, 'rental_no': await _allocateNumber(row['id'] as String)}
             : row);
@@ -311,6 +321,34 @@ class CloudSyncEngine {
 
     final remote = rows.map((r) => _toRemote(table, r)).toList();
     await client.from(table).upsert(remote, ignoreDuplicates: ignoreExisting);
+  }
+
+  List<String> _notices = [];
+
+  /// A rental pointing at a customer/vehicle that exists nowhere any more
+  /// (a copy that was replaced before its link could be re-pointed) would
+  /// be refused by the server forever. The dead link is cleared so the
+  /// rental syncs, and the owner is told which rental needs the link set
+  /// again. Nothing else about the rental changes.
+  Future<Map<String, Object?>> _healLinks(Map<String, Object?> row) async {
+    var healed = row;
+    for (final (column, table) in _rentalParents) {
+      final ref = row[column] as String?;
+      if (ref == null || await _rowById(table, ref) != null) continue;
+      await db.update(
+        'rentals',
+        {column: null},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+      healed = {...healed, column: null};
+      final what = column == 'customer_id' ? 'customer' : 'vehicle';
+      _notices.add(
+        'Rental ${rentalDisplayNumber(healed)} lost its $what link and needs '
+        'it set again (open the rental, Edit).',
+      );
+    }
+    return healed;
   }
 
   Future<void> _upsertRentals(
@@ -708,9 +746,12 @@ class CloudSyncEngine {
       return row == null ? null : _match(table, row, pulled[table]!);
     }
 
-    Future<String> resolveOrKeep(String table, String id) async {
+    /// Null when the referenced row exists nowhere any more: the link is
+    /// then cleared (the push path reports it to the owner).
+    Future<String?> resolveOrKeep(String table, String id) async {
       final target = await resolve(table, id);
       if (target != null) return target;
+      if (await _rowById(table, id) == null) return null;
       keep[table]!.add(id);
       return id;
     }
@@ -736,7 +777,10 @@ class CloudSyncEngine {
         if (table == 'rentals') {
           for (final (column, parent) in _rentalParents) {
             final ref = row[column] as String?;
-            if (ref != null) merged[column] = await resolveOrKeep(parent, ref);
+            if (ref != null) {
+              merged[column] =
+                  await resolveOrKeep(parent, ref) ?? cloud?[column];
+            }
           }
         }
         merged['version'] = ((cloud?['version'] as int?) ?? 0) + 1;
@@ -775,7 +819,7 @@ class CloudSyncEngine {
       if (row == null) continue;
       final rentalId = row['entity_id'] as String;
       final target = await resolveOrKeep('rentals', rentalId);
-      if (target != rentalId) {
+      if (target != null && target != rentalId) {
         await db.update(
           'attachments',
           {'entity_id': target},
@@ -1105,7 +1149,14 @@ class _PushResult {
   final int failed;
   final int conflicts;
   final String? firstError;
-  _PushResult(this.pushed, this.failed, this.conflicts, this.firstError);
+  final List<String> notices;
+  _PushResult(
+    this.pushed,
+    this.failed,
+    this.conflicts,
+    this.firstError,
+    this.notices,
+  );
 }
 
 bool _asBool(Object? sqliteInt) => sqliteInt == 1;

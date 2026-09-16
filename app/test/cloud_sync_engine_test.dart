@@ -595,6 +595,43 @@ void main() {
     });
   });
 
+  test('a rental whose vehicle row vanished still syncs, and says so',
+      () async {
+    final db = await openAppDatabase(
+      databaseFactoryFfi,
+      p.join(dir.path, 'dead.db'),
+    );
+    final engine = engineFor(db);
+    await engine.syncNow();
+    final customer =
+        (await db.query('customers', limit: 1)).first['id'] as String;
+    final rentalId = await LocalSyncEngine().createPendingRental(
+      db,
+      customerId: customer,
+      vehicleId: 'gone-forever',
+      amount: 1200,
+      status: 'Open',
+    );
+
+    final summary = await engine.syncNow();
+    expect(summary.failed, 0, reason: summary.error);
+    expect(summary.pushed, 1);
+    expect(summary.notices, hasLength(1));
+    expect(summary.notices.single, contains('lost its vehicle link'));
+    final pushed = server.tables['rentals']![rentalId]!;
+    expect(pushed['vehicle_id'], isNull);
+    expect(pushed['customer_id'], customer);
+    expect(pushed['rental_no'], 61);
+    final local =
+        (await db.query('rentals', where: 'id = ?', whereArgs: [rentalId]))
+            .first;
+    expect(local['vehicle_id'], isNull);
+
+    final again = await engine.syncNow();
+    expect(again.notices, isEmpty);
+    await db.close();
+  });
+
   test('push failures are reported, not hidden', () async {
     final db = await openAppDatabase(
       databaseFactoryFfi,

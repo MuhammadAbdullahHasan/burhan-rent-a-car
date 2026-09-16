@@ -53,12 +53,13 @@ Future<String> runSync(AppServices services) async {
     message = 'Synced — ${parts.join(', ')}.';
   }
 
+  final notice = summary.notices.isEmpty ? null : summary.notices.join(' ');
   services.syncStatus.value = services.syncStatus.value.copyWith(
     phase: summary.hasError ? SyncPhase.error : SyncPhase.idle,
     lastSuccess: summary.hasError ? null : DateTime.now(),
     pending: pending,
-    message: problem,
-    clearMessage: !summary.hasError,
+    message: problem ?? notice,
+    clearMessage: !summary.hasError && notice == null,
   );
-  return message;
+  return notice == null ? message : '$message $notice';
 }
