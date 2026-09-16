@@ -1,7 +1,7 @@
 name: burhan_rent_a_car
 description: Offline-first rental management for Burhan Rent-A-Car.
 publish_to: 'none'
-version: 0.2.1+3
+version: 0.2.2+4
 
 environment:
   sdk: '>=3.6.0 <4.0.0'
@@ -30,6 +30,7 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   # Lets widget tests open a real database without a device.
   sqflite_common_ffi: ^2.3.4
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
@@ -37,3 +38,17 @@ flutter:
     # DEVELOPMENT ONLY: seeds the local database on first launch so there is
     # realistic data to work against before the real CSV exists.
     - assets/burhan_rent_a_car_temporary_test.csv
+
+# Launcher icon, generated from the business logo with
+# `dart run flutter_launcher_icons`. Sources live in assets/icon/.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  web:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    background_color: "#000000"
+    theme_color: "#12496B"
