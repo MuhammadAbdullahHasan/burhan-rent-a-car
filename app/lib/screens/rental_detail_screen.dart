@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../app_services.dart';
+import '../sync/sync_actions.dart';
 import '../services/agreement_photo.dart';
 import '../widgets/agreement_card.dart';
 import '../widgets/common.dart';
@@ -128,21 +129,9 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
   Future<void> _syncNow(Map<String, Object?> rental) async {
     final services = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    await services.engine.syncPending(services.db);
+    final message = await runSync(services);
     if (!mounted) return;
-    final updated = await services.rentals.getById(
-      services.db,
-      rental['id'] as String,
-    );
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          updated != null && !isPendingRental(updated)
-              ? 'Assigned ${rentalDisplayNumber(updated)}.'
-              : 'Synced.',
-        ),
-      ),
-    );
+    messenger.showSnackBar(SnackBar(content: Text(message)));
     _reload();
   }
 
@@ -303,11 +292,16 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                         ),
                       ),
                     const SizedBox(height: 12),
-                    DetailField(label: 'Start date', value: rental['start_date']),
-                    DetailField(label: 'Start time', value: rental['start_time']),
-                    DetailField(label: 'Return date', value: rental['end_date']),
-                    DetailField(label: 'Return time', value: rental['end_time']),
-                    DetailField(label: 'Booked days', value: rental['book_days']),
+                    DetailField(
+                        label: 'Start date', value: rental['start_date']),
+                    DetailField(
+                        label: 'Start time', value: rental['start_time']),
+                    DetailField(
+                        label: 'Return date', value: rental['end_date']),
+                    DetailField(
+                        label: 'Return time', value: rental['end_time']),
+                    DetailField(
+                        label: 'Booked days', value: rental['book_days']),
                     DetailField(label: 'Amount', value: rental['amount']),
                     DetailField(label: 'Balance', value: rental['balance']),
                     DetailField(label: 'Remarks', value: rental['remarks']),
@@ -334,7 +328,8 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                   children: [
                     DetailField(label: 'Name', value: rental['ref_name']),
                     DetailField(label: 'Contact', value: rental['ref_contact']),
-                    DetailField(label: 'Relation', value: rental['ref_relation']),
+                    DetailField(
+                        label: 'Relation', value: rental['ref_relation']),
                   ],
                 ),
               ),
@@ -400,8 +395,7 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed:
-                            isClosed ? null : () => _closeRental(rental),
+                        onPressed: isClosed ? null : () => _closeRental(rental),
                         icon: const Icon(Icons.check),
                         label: Text(isClosed ? 'Closed' : 'Close Rental'),
                       ),

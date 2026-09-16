@@ -140,7 +140,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     const SizedBox(height: 12),
                     DetailField(label: 'Phone', value: customer['phone']),
                     DetailField(label: 'CNIC', value: customer['cnic']),
-                    DetailField(label: 'License #', value: customer['license_no']),
+                    DetailField(
+                        label: 'License #', value: customer['license_no']),
                     DetailField(
                       label: 'License city',
                       value: customer['license_city'],
@@ -163,7 +164,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         children: [
                           for (final vehicle in data.vehicles)
                             ActionChip(
-                              avatar: const Icon(Icons.directions_car, size: 18),
+                              avatar:
+                                  const Icon(Icons.directions_car, size: 18),
                               label: Text(
                                 '${displayOrNA(vehicle['registration_no'])}'
                                 '  ·  ${vehicle['rental_count']}',

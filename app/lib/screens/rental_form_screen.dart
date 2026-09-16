@@ -713,7 +713,10 @@ class _EntityPickerState extends State<EntityPicker> {
                       ? rows
                       : rows
                           .where((r) =>
-                              widget.labelOf(r).toLowerCase().contains(_filter) ||
+                              widget
+                                  .labelOf(r)
+                                  .toLowerCase()
+                                  .contains(_filter) ||
                               widget
                                   .subtitleOf(r)
                                   .toLowerCase()

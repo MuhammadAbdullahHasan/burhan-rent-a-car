@@ -153,16 +153,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _open(SearchResult result) async {
     final route = switch (result.type) {
-      SearchResultType.rental =>
-        MaterialPageRoute<void>(
+      SearchResultType.rental => MaterialPageRoute<void>(
           builder: (_) => RentalDetailScreen(rentalId: result.id),
         ),
-      SearchResultType.customer =>
-        MaterialPageRoute<void>(
+      SearchResultType.customer => MaterialPageRoute<void>(
           builder: (_) => CustomerDetailScreen(customerId: result.id),
         ),
-      SearchResultType.vehicle =>
-        MaterialPageRoute<void>(
+      SearchResultType.vehicle => MaterialPageRoute<void>(
           builder: (_) => VehicleDetailScreen(vehicleId: result.id),
         ),
     };
@@ -316,10 +313,15 @@ class _ResultTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final (icon, tint) = switch (result.type) {
-      SearchResultType.rental => (Icons.receipt_long, theme.colorScheme.primary),
+      SearchResultType.rental => (
+          Icons.receipt_long,
+          theme.colorScheme.primary
+        ),
       SearchResultType.customer => (Icons.person, theme.colorScheme.secondary),
-      SearchResultType.vehicle =>
-        (Icons.directions_car, theme.colorScheme.tertiary),
+      SearchResultType.vehicle => (
+          Icons.directions_car,
+          theme.colorScheme.tertiary
+        ),
     };
 
     return ListTile(

@@ -2,6 +2,7 @@ import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 
 import '../app_services.dart';
+import '../sync/sync_actions.dart';
 import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
 import '../widgets/rental_tile.dart';
@@ -38,9 +39,11 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       recent: await services.rentals.recent(db, limit: 5),
       insuranceDue: await services.vehicles.insuranceDue(db, withinDays: 60),
-      pendingSync: (await db.rawQuery(
-            "SELECT COUNT(*) AS c FROM sync_queue WHERE status = 'pending'",
-          ).then((r) => r.first['c'] as int?)) ??
+      pendingSync: (await db
+              .rawQuery(
+                "SELECT COUNT(*) AS c FROM sync_queue WHERE status = 'pending'",
+              )
+              .then((r) => r.first['c'] as int?)) ??
           0,
     );
   }
@@ -60,18 +63,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _syncNow() async {
     final services = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final processed = await services.engine.syncPending(services.db);
+    final message = await runSync(services);
     if (!mounted) return;
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          processed == 0
-              ? 'Nothing to sync.'
-              : '$processed rental${processed == 1 ? '' : 's'} assigned a '
-                  'permanent number.',
-        ),
-      ),
-    );
+    messenger.showSnackBar(SnackBar(content: Text(message)));
     _reload();
   }
 
@@ -290,10 +284,12 @@ class _AccountMenuState extends State<_AccountMenu> {
         content: Text('Fingerprint / face sign-in turned off.'),
       ));
     } else {
-      final ok = await b.authenticate('Confirm to turn on fingerprint / face sign-in');
+      final ok =
+          await b.authenticate('Confirm to turn on fingerprint / face sign-in');
       if (!ok) {
         messenger.showSnackBar(const SnackBar(
-          content: Text("Couldn't verify — fingerprint / face sign-in stays off."),
+          content:
+              Text("Couldn't verify — fingerprint / face sign-in stays off."),
         ));
         return;
       }
@@ -506,7 +502,8 @@ class _Dashboard {
     if (pendingSync > 0) {
       notes.add(_Note(
         icon: Icons.cloud_upload_outlined,
-        title: '$pendingSync change${pendingSync == 1 ? '' : 's'} waiting to sync',
+        title:
+            '$pendingSync change${pendingSync == 1 ? '' : 's'} waiting to sync',
         subtitle: 'Tap Sync Now to assign permanent rental numbers.',
         isSyncPrompt: true,
       ));

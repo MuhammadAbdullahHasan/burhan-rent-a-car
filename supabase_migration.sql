@@ -87,10 +87,36 @@ create index idx_rentals_start on rentals(start_date);
 -- Atomically assigns the next permanent rental number -- the online path
 -- of §2. Offline-created rentals call this only once they sync; a rental
 -- number is never guessed or reserved client-side.
+--
+-- Next number = one past the highest ever seen, from EITHER source:
+--   * the highest rental_no actually stored (live, soft-deleted or
+--     placeholder alike -- a retired number is never handed out again), or
+--   * the sequence, which acts as a floor for numbers that exist only in
+--     the historical dataset not yet loaded here.
+-- An advisory lock serialises concurrent syncs from different devices.
 create function allocate_rental_no() returns integer
-  language sql security definer set search_path = public as $$
-  select nextval('rentals_rental_no_seq')::integer;
+  language plpgsql security definer set search_path = public as $$
+declare
+  data_max integer;
+  seq_pos bigint;
+  next_no integer;
+begin
+  perform pg_advisory_xact_lock(hashtext('allocate_rental_no'));
+  select coalesce(max(rental_no), 0) into data_max from rentals;
+  select case when is_called then last_value else last_value - 1 end
+    into seq_pos from rentals_rental_no_seq;
+  next_no := greatest(data_max, seq_pos) + 1;
+  perform setval('rentals_rental_no_seq', next_no);
+  return next_no;
+end;
 $$;
+revoke execute on function allocate_rental_no() from public, anon;
+grant execute on function allocate_rental_no() to authenticated;
+
+-- Development dataset: highest real number is #60, so the first rental
+-- created in the app becomes #61. Re-run against MAX(rental_no) after the
+-- real historical import.
+select setval('rentals_rental_no_seq', 60);
 
 -- Durable audit trail (locked spec §5/§6): one row per create/update/
 -- delete, written by the app (or, later, a trigger) alongside the change.
@@ -130,3 +156,32 @@ create policy "owner deletes own rentals" on rentals for delete using (owner_id 
 
 create policy "owner reads own audit log" on audit_log for select using (owner_id = auth.uid());
 create policy "owner writes own audit log" on audit_log for insert with check (owner_id = auth.uid());
+
+-- Agreement photos, one row per image, synced like every other entity.
+-- Stored base64-encoded so the same payload shape works over PostgREST in
+-- both directions without binary escaping.
+create table attachments (
+  id               uuid primary key,
+  owner_id         uuid not null default auth.uid() references auth.users(id),
+  entity_type      text not null,
+  entity_id        uuid not null,
+  kind             text not null,
+  mime_type        text,
+  image_base64     text not null,
+  thumbnail_base64 text,
+  is_deleted       boolean not null default false,
+  version          integer not null default 1,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index idx_attachments_entity on attachments(entity_type, entity_id);
+alter table attachments enable row level security;
+create policy "owner reads own attachments" on attachments for select using (owner_id = auth.uid());
+create policy "owner writes own attachments" on attachments for insert with check (owner_id = auth.uid());
+create policy "owner updates own attachments" on attachments for update using (owner_id = auth.uid());
+create policy "owner deletes own attachments" on attachments for delete using (owner_id = auth.uid());
+
+-- Incremental pull: "everything changed since this device last synced".
+create index idx_customers_updated on customers(owner_id, updated_at);
+create index idx_vehicles_updated on vehicles(owner_id, updated_at);
+create index idx_rentals_updated on rentals(owner_id, updated_at);

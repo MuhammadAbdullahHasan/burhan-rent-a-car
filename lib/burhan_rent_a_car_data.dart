@@ -2,7 +2,7 @@
 /// future Flutter app (and, until then, by this package's own tests).
 library burhan_rent_a_car_data;
 
-export 'package:sqflite_common/sqlite_api.dart' show Database, DatabaseExecutor, DatabaseFactory;
+export 'package:sqflite_common/sqlite_api.dart' show ConflictAlgorithm, Database, DatabaseExecutor, DatabaseFactory;
 
 export 'src/backup/snapshot.dart';
 export 'src/db/database.dart';

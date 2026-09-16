@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_services.dart';
@@ -14,6 +15,7 @@ import 'auth/secure_session_storage.dart';
 import 'auth/set_new_password_screen.dart';
 import 'auth/sign_in_screen.dart';
 import 'screens/shell_screen.dart';
+import 'sync/cloud_sync_engine.dart';
 import 'supabase_config.dart';
 import 'theme.dart';
 
@@ -60,6 +62,8 @@ class _BurhanAppState extends State<BurhanApp> {
   late final BiometricService _biometrics = DeviceBiometricService();
   Future<AppServices>? _servicesFuture;
   StreamSubscription<AuthState>? _authSub;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  bool _cloudSyncStarted = false;
 
   /// True once the owner has proven who they are *this launch* -- by typing
   /// the password, or by passing the biometric lock. A session restored
@@ -94,6 +98,9 @@ class _BurhanAppState extends State<BurhanApp> {
             _unlocked = false;
             _offerPending = false;
             _discarding = false;
+            _cloudSyncStarted = false;
+            _connectivitySub?.cancel();
+            _connectivitySub = null;
           default:
             break;
         }
@@ -104,7 +111,29 @@ class _BurhanAppState extends State<BurhanApp> {
   @override
   void dispose() {
     _authSub?.cancel();
+    _connectivitySub?.cancel();
     super.dispose();
+  }
+
+  /// Starts talking to Postgres once the owner is fully signed in and the
+  /// local database is open: one sync right away (so another device's
+  /// changes show up without a manual tap), then again whenever the
+  /// connection comes back. Everything else keeps reading/writing local
+  /// SQLite regardless of whether this has run yet.
+  void _startCloudSync(AppServices services) {
+    if (_cloudSyncStarted) return;
+    _cloudSyncStarted = true;
+    final engine = CloudSyncEngine(
+      client: Supabase.instance.client,
+      db: services.db,
+    );
+    services.cloudSync = engine;
+    engine.syncNow();
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      if (results.any((r) => r != ConnectivityResult.none)) {
+        engine.syncNow();
+      }
+    });
   }
 
   /// Only a recovery link changes the flow: it routes to the
@@ -231,6 +260,7 @@ class _BurhanAppState extends State<BurhanApp> {
         final services = svcSnapshot.data!;
         services.signOut = _authService.signOut;
         services.biometrics = _biometrics;
+        _startCloudSync(services);
         return AppScope(
           services: services,
           child: MaterialApp(

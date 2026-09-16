@@ -120,7 +120,8 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
         );
       }
       messenger.showSnackBar(
-        SnackBar(content: Text(_isEdit ? 'Vehicle updated.' : 'Vehicle added.')),
+        SnackBar(
+            content: Text(_isEdit ? 'Vehicle updated.' : 'Vehicle added.')),
       );
       navigator.pop(true);
     } catch (error) {

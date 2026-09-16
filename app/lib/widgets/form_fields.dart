@@ -179,10 +179,9 @@ class _AppDateFieldState extends State<AppDateField> {
               ? IconButton(
                   tooltip: 'Clear',
                   icon: const Icon(Icons.clear, size: 18),
-                  onPressed: () =>
-                      setState(() {
-                        widget.controller.clear();
-                      }),
+                  onPressed: () => setState(() {
+                    widget.controller.clear();
+                  }),
                 )
               : null,
         ),

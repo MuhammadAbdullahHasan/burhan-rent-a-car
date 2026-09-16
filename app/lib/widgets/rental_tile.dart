@@ -129,9 +129,7 @@ String? _formatAmount(Object? value) {
   if (value == null) return null;
   final number = value is num ? value : num.tryParse(value.toString());
   if (number == null) return value.toString();
-  return number
-      .toStringAsFixed(0)
-      .replaceAllMapped(
+  return number.toStringAsFixed(0).replaceAllMapped(
         RegExp(r'(\d)(?=(\d{3})+$)'),
         (m) => '${m[1]},',
       );

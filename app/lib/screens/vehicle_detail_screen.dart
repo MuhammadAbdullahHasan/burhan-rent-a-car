@@ -35,7 +35,8 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     final services = AppScope.of(context);
     final db = services.db;
     final vehicle = await services.vehicles.getById(db, widget.vehicleId);
-    final rentals = await services.rentals.findByVehicleId(db, widget.vehicleId);
+    final rentals =
+        await services.rentals.findByVehicleId(db, widget.vehicleId);
     return _VehicleData(
       vehicle: vehicle,
       customers: await services.vehicles.customersFor(db, widget.vehicleId),
@@ -100,9 +101,10 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                   children: [
                     Text(
                       displayOrNA(vehicle['registration_no']),
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                     ),
                     const SizedBox(height: 12),
                     DetailField(label: 'Company', value: vehicle['company']),
@@ -117,7 +119,8 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                       label: 'Reg. year',
                       value: vehicle['reg_year'],
                     ),
-                    DetailField(label: 'Chassis #', value: vehicle['chassis_no']),
+                    DetailField(
+                        label: 'Chassis #', value: vehicle['chassis_no']),
                     DetailField(label: 'Engine #', value: vehicle['engine_no']),
                     DetailField(
                       label: 'Insurance due',
@@ -224,7 +227,8 @@ class _CustomerVehicleHistoryScreen extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
           SectionCard(
-            title: 'ON ${displayOrNA(vehicle['registration_no']).toUpperCase()}',
+            title:
+                'ON ${displayOrNA(vehicle['registration_no']).toUpperCase()}',
             action: TextButton(
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(

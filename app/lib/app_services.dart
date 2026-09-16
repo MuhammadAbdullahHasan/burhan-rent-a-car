@@ -1,6 +1,7 @@
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 
 import 'auth/biometric_service.dart';
+import 'sync/cloud_sync_engine.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -30,6 +31,11 @@ class AppServices {
   /// Fingerprint/face preference, for the Home menu switch. Null without an
   /// auth layer.
   BiometricService? biometrics;
+
+  /// The push/pull engine to Postgres. Null in widget tests (no auth/
+  /// network layer); sync_actions.dart falls back to the local stand-in
+  /// when this is null, so screens never need to check it themselves.
+  CloudSyncEngine? cloudSync;
 
   AppServices._(this.db)
       : customers = CustomerRepository(),
@@ -104,6 +110,5 @@ class AppScope extends InheritedWidget {
   }
 
   @override
-  bool updateShouldNotify(AppScope oldWidget) =>
-      oldWidget.services != services;
+  bool updateShouldNotify(AppScope oldWidget) => oldWidget.services != services;
 }
