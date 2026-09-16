@@ -22,6 +22,14 @@ Future<Database> openAppDatabase(
           await db.execute(statement);
         }
       },
+      // Additive only: an existing device database keeps every row it has.
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          for (final statement in attachmentsTableStatements) {
+            await db.execute(statement);
+          }
+        }
+      },
     ),
   );
 }

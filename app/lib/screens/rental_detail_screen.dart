@@ -1,7 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../app_services.dart';
+import '../services/agreement_photo.dart';
+import '../widgets/agreement_card.dart';
 import '../widgets/common.dart';
 import 'customer_detail_screen.dart';
 import 'rental_form_screen.dart';
@@ -32,6 +37,10 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
     if (rental == null) return _RentalData(rental: null);
     final customerId = rental['customer_id'] as String?;
     final vehicleId = rental['vehicle_id'] as String?;
+    final agreement = await services.attachments.rentalAgreement(
+      db,
+      widget.rentalId,
+    );
     return _RentalData(
       rental: rental,
       customer: customerId == null
@@ -40,7 +49,71 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
       vehicle: vehicleId == null
           ? null
           : await services.vehicles.getById(db, vehicleId),
+      agreementImage: agreement?['image'] as Uint8List?,
     );
+  }
+
+  bool _photoBusy = false;
+
+  Future<void> _attachPhoto(ImageSource source) async {
+    final services = AppScope.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final picker = AgreementPhotoPicker();
+    setState(() => _photoBusy = true);
+    try {
+      final photo = await picker.pickFrom(source);
+      if (photo == null) {
+        // Either the user backed out, or the file wasn't a readable image.
+        return;
+      }
+      await services.engine.setRentalAgreementPhoto(
+        services.db,
+        rentalId: widget.rentalId,
+        image: photo.image,
+        thumbnail: photo.thumbnail,
+        mimeType: AgreementPhoto.mimeType,
+      );
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Agreement photo saved.')),
+      );
+      _reload();
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not save the photo: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _photoBusy = false);
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    final services = AppScope.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove agreement photo?'),
+        content: const Text(
+          'The photo will no longer show on this rental. You can add a new '
+          'one at any time.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await services.engine.removeRentalAgreementPhoto(
+      services.db,
+      widget.rentalId,
+    );
+    _reload();
   }
 
   void _reload() {
@@ -242,6 +315,19 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                 ),
               ),
               const SizedBox(height: 16),
+              AgreementCard(
+                image: data.agreementImage,
+                rentalLabel: rentalDisplayNumber(rental),
+                busy: _photoBusy,
+                onTakePhoto:
+                    isDeleted ? null : () => _attachPhoto(ImageSource.camera),
+                onChooseFromGallery:
+                    isDeleted ? null : () => _attachPhoto(ImageSource.gallery),
+                onRemove: isDeleted || data.agreementImage == null
+                    ? null
+                    : _removePhoto,
+              ),
+              const SizedBox(height: 16),
               SectionCard(
                 title: 'REFERENCE',
                 child: Column(
@@ -397,6 +483,12 @@ class _RentalData {
   final Map<String, Object?>? rental;
   final Map<String, Object?>? customer;
   final Map<String, Object?>? vehicle;
+  final Uint8List? agreementImage;
 
-  _RentalData({required this.rental, this.customer, this.vehicle});
+  _RentalData({
+    required this.rental,
+    this.customer,
+    this.vehicle,
+    this.agreementImage,
+  });
 }

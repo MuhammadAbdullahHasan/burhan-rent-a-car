@@ -13,6 +13,7 @@ export 'src/import/import_pipeline.dart';
 export 'src/import/mapped_rental_row.dart';
 export 'src/import/reconciliation_report.dart';
 export 'src/import/test_csv_mapper.dart';
+export 'src/repositories/attachment_repository.dart';
 export 'src/repositories/customer_repository.dart';
 export 'src/repositories/rental_repository.dart';
 export 'src/repositories/vehicle_repository.dart';

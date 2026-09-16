@@ -17,6 +17,7 @@ class AppServices {
   final CustomerRepository customers;
   final VehicleRepository vehicles;
   final RentalRepository rentals;
+  final AttachmentRepository attachments;
   final UniversalSearchService search;
   final LocalSyncEngine engine;
 
@@ -28,6 +29,7 @@ class AppServices {
       : customers = CustomerRepository(),
         vehicles = VehicleRepository(),
         rentals = RentalRepository(),
+        attachments = AttachmentRepository(),
         search = UniversalSearchService(),
         engine = LocalSyncEngine();
 

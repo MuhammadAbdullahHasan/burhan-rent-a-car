@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 
@@ -33,10 +35,15 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     final services = AppScope.of(context);
     final db = services.db;
     final vehicle = await services.vehicles.getById(db, widget.vehicleId);
+    final rentals = await services.rentals.findByVehicleId(db, widget.vehicleId);
     return _VehicleData(
       vehicle: vehicle,
       customers: await services.vehicles.customersFor(db, widget.vehicleId),
-      rentals: await services.rentals.findByVehicleId(db, widget.vehicleId),
+      rentals: rentals,
+      thumbnails: await services.attachments.agreementThumbnails(
+        db,
+        rentals.map((r) => r['id'] as String),
+      ),
     );
   }
 
@@ -173,6 +180,8 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                           for (final rental in data.rentals)
                             RentalTile(
                               rental: rental,
+                              agreementThumbnail:
+                                  data.thumbnails[rental['id'] as String],
                               onTap: () async {
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
@@ -261,10 +270,12 @@ class _VehicleData {
   final Map<String, Object?>? vehicle;
   final List<Map<String, Object?>> customers;
   final List<Map<String, Object?>> rentals;
+  final Map<String, Uint8List> thumbnails;
 
   _VehicleData({
     required this.vehicle,
     required this.customers,
     required this.rentals,
+    this.thumbnails = const {},
   });
 }

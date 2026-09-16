@@ -9,7 +9,7 @@
 /// touches the import mapper, not this schema.
 library;
 
-const schemaVersion = 1;
+const schemaVersion = 2;
 
 const List<String> createTableStatements = [
   '''
@@ -110,4 +110,33 @@ const List<String> createTableStatements = [
   )
   ''',
   'CREATE INDEX idx_sync_queue_status ON sync_queue(status)',
+  ...attachmentsTableStatements,
+];
+
+/// Photos attached to a record -- today the handwritten rental agreement.
+/// Bytes live in the row rather than on the filesystem so one database
+/// file is the whole backup, the same snapshot export/restore covers them,
+/// and web (no filesystem) behaves identically. A small thumbnail is stored
+/// alongside so lists never decode the full image. Kept out of `rentals`
+/// so rental queries never touch image bytes.
+///
+/// Schema version 2. Also applied by `onUpgrade` for databases created at
+/// version 1.
+const List<String> attachmentsTableStatements = [
+  '''
+  CREATE TABLE attachments (
+    id           TEXT PRIMARY KEY,
+    entity_type  TEXT NOT NULL,
+    entity_id    TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    mime_type    TEXT,
+    image        BLOB NOT NULL,
+    thumbnail    BLOB,
+    is_deleted   INTEGER NOT NULL DEFAULT 0,
+    version      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+  )
+  ''',
+  'CREATE INDEX idx_attachments_entity ON attachments(entity_type, entity_id, kind)',
 ];

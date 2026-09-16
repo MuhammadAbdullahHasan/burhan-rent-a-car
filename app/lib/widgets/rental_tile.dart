@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 
@@ -14,11 +16,17 @@ class RentalTile extends StatelessWidget {
   final String? contextLabel;
   final VoidCallback? onTap;
 
+  /// Thumbnail of the paper agreement, when one is attached -- so a
+  /// customer's or vehicle's history shows at a glance which rentals have
+  /// their agreement on file.
+  final Uint8List? agreementThumbnail;
+
   const RentalTile({
     super.key,
     required this.rental,
     this.contextLabel,
     this.onTap,
+    this.agreementThumbnail,
   });
 
   @override
@@ -58,6 +66,18 @@ class RentalTile extends StatelessWidget {
 
     return ListTile(
       onTap: onTap,
+      leading: agreementThumbnail == null
+          ? null
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.memory(
+                agreementThumbnail!,
+                width: 44,
+                height: 56,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              ),
+            ),
       title: Row(
         children: [
           RentalNumberBadge(rental: rental),

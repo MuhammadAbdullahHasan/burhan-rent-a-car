@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:sqflite_common/sqlite_api.dart';
 
+import '../repositories/attachment_repository.dart';
 import '../repositories/customer_repository.dart';
 import '../repositories/rental_repository.dart';
 import '../repositories/vehicle_repository.dart';
@@ -17,6 +20,7 @@ class LocalSyncEngine {
   final RentalRepository rentals;
   final CustomerRepository customers;
   final VehicleRepository vehicles;
+  final AttachmentRepository attachments;
   final Outbox outbox;
   final RentalNumberAllocator allocator;
 
@@ -24,11 +28,13 @@ class LocalSyncEngine {
     RentalRepository? rentals,
     CustomerRepository? customers,
     VehicleRepository? vehicles,
+    AttachmentRepository? attachments,
     Outbox? outbox,
     RentalNumberAllocator? allocator,
   })  : rentals = rentals ?? RentalRepository(),
         customers = customers ?? CustomerRepository(),
         vehicles = vehicles ?? VehicleRepository(),
+        attachments = attachments ?? AttachmentRepository(),
         outbox = outbox ?? Outbox(),
         allocator = allocator ?? RentalNumberAllocator();
 
@@ -230,6 +236,50 @@ class LocalSyncEngine {
         entityId: vehicleId,
         operation: 'update',
         payload: fields,
+      );
+    });
+  }
+
+  /// Attaches (or replaces) the photo of a rental's paper agreement. The
+  /// outbox entry carries only the attachment id -- the real sync engine
+  /// will read the bytes from the row when it pushes, rather than
+  /// duplicating them in the queue payload.
+  Future<String> setRentalAgreementPhoto(
+    Database db, {
+    required String rentalId,
+    required Uint8List image,
+    Uint8List? thumbnail,
+    String? mimeType,
+  }) async {
+    late String id;
+    await db.transaction((txn) async {
+      id = await attachments.setRentalAgreement(
+        txn,
+        rentalId: rentalId,
+        image: image,
+        thumbnail: thumbnail,
+        mimeType: mimeType,
+      );
+      await outbox.enqueue(
+        txn,
+        entityType: 'attachment',
+        entityId: id,
+        operation: 'insert',
+      );
+    });
+    return id;
+  }
+
+  Future<void> removeRentalAgreementPhoto(Database db, String rentalId) async {
+    await db.transaction((txn) async {
+      final existing = await attachments.rentalAgreement(txn, rentalId);
+      if (existing == null) return;
+      await attachments.removeRentalAgreement(txn, rentalId);
+      await outbox.enqueue(
+        txn,
+        entityType: 'attachment',
+        entityId: existing['id'] as String,
+        operation: 'delete',
       );
     });
   }

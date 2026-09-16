@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 
@@ -41,11 +43,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     );
     // Label each rental with its vehicle so the history reads on its own.
     final byId = {for (final v in vehicles) v['id'] as String: v};
+    final thumbnails = await services.attachments.agreementThumbnails(
+      db,
+      rentals.map((r) => r['id'] as String),
+    );
     return _CustomerData(
       customer: customer,
       rentals: rentals,
       vehicles: vehicles,
       vehicleById: byId,
+      thumbnails: thumbnails,
     );
   }
 
@@ -190,6 +197,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                             RentalTile(
                               rental: rental,
                               contextLabel: _vehicleLabel(data, rental),
+                              agreementThumbnail:
+                                  data.thumbnails[rental['id'] as String],
                               onTap: () async {
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
@@ -223,11 +232,13 @@ class _CustomerData {
   final List<Map<String, Object?>> rentals;
   final List<Map<String, Object?>> vehicles;
   final Map<String, Map<String, Object?>> vehicleById;
+  final Map<String, Uint8List> thumbnails;
 
   _CustomerData({
     required this.customer,
     required this.rentals,
     required this.vehicles,
     required this.vehicleById,
+    this.thumbnails = const {},
   });
 }

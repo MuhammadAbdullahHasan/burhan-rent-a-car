@@ -1,7 +1,10 @@
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../app_services.dart';
+import '../services/agreement_photo.dart';
+import '../widgets/agreement_card.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
 import 'customer_form_screen.dart';
@@ -41,6 +44,27 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
   String _status = 'Open';
   bool _saving = false;
   bool _linkError = false;
+
+  /// Photo taken while filling in a new rental; stored once the rental
+  /// exists. (An existing rental's photo is managed from its detail screen.)
+  AgreementPhoto? _pendingPhoto;
+  bool _photoBusy = false;
+
+  Future<void> _capturePhoto(ImageSource source) async {
+    setState(() => _photoBusy = true);
+    try {
+      final photo = await AgreementPhotoPicker().pickFrom(source);
+      if (photo != null && mounted) setState(() => _pendingPhoto = photo);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not get the photo: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _photoBusy = false);
+    }
+  }
 
   bool get _isEdit => widget.rental != null;
 
@@ -223,7 +247,7 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
           ),
         );
       } else {
-        await services.engine.createPendingRental(
+        final rentalId = await services.engine.createPendingRental(
           services.db,
           customerId: _customer?['id'] as String?,
           vehicleId: _vehicle?['id'] as String?,
@@ -240,6 +264,16 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
           refContact: _text(_refContact),
           refRelation: _text(_refRelation),
         );
+        final photo = _pendingPhoto;
+        if (photo != null) {
+          await services.engine.setRentalAgreementPhoto(
+            services.db,
+            rentalId: rentalId,
+            image: photo.image,
+            thumbnail: photo.thumbnail,
+            mimeType: AgreementPhoto.mimeType,
+          );
+        }
         messenger.showSnackBar(
           const SnackBar(
             content: Text(
@@ -405,6 +439,20 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
                 ),
               ],
             ),
+            if (!_isEdit) ...[
+              AgreementCard(
+                title: 'AGREEMENT PHOTO (OPTIONAL)',
+                image: _pendingPhoto?.image,
+                rentalLabel: 'new rental',
+                busy: _photoBusy,
+                onTakePhoto: () => _capturePhoto(ImageSource.camera),
+                onChooseFromGallery: () => _capturePhoto(ImageSource.gallery),
+                onRemove: _pendingPhoto == null
+                    ? null
+                    : () => setState(() => _pendingPhoto = null),
+              ),
+              const SizedBox(height: 16),
+            ],
             FormSection(
               title: 'REFERENCE (OPTIONAL)',
               children: [

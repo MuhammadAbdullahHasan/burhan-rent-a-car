@@ -11,11 +11,13 @@ class Snapshot {
   final List<Map<String, Object?>> customers;
   final List<Map<String, Object?>> vehicles;
   final List<Map<String, Object?>> rentals;
+  final List<Map<String, Object?>> attachments;
 
   Snapshot({
     required this.customers,
     required this.vehicles,
     required this.rentals,
+    this.attachments = const [],
   });
 }
 
@@ -24,6 +26,7 @@ Future<Snapshot> exportSnapshot(DatabaseExecutor db) async {
     customers: await db.query('customers'),
     vehicles: await db.query('vehicles'),
     rentals: await db.query('rentals'),
+    attachments: await db.query('attachments'),
   );
 }
 
@@ -49,6 +52,13 @@ Future<void> restoreSnapshot(Database db, Snapshot snapshot) async {
     for (final row in snapshot.rentals) {
       await txn.insert(
         'rentals',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    for (final row in snapshot.attachments) {
+      await txn.insert(
+        'attachments',
         row,
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
