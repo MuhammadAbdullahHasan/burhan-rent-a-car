@@ -308,6 +308,19 @@ class FormActionBar extends StatelessWidget {
   }
 }
 
+/// Days to bill for a rental from [startIso] to [endIso] (yyyy-MM-dd): the
+/// number of nights between them, and never less than one -- a car taken
+/// and returned the same day is still a day's rental. Null when either
+/// date is missing/invalid or the return is before the start.
+int? bookedDaysBetween(String? startIso, String? endIso) {
+  final start = DateTime.tryParse((startIso ?? '').trim());
+  final end = DateTime.tryParse((endIso ?? '').trim());
+  if (start == null || end == null) return null;
+  final days = end.difference(start).inDays;
+  if (days < 0) return null;
+  return days == 0 ? 1 : days;
+}
+
 String formatIsoDate(DateTime date) {
   final m = date.month.toString().padLeft(2, '0');
   final d = date.day.toString().padLeft(2, '0');

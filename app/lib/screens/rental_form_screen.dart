@@ -100,6 +100,18 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
     } else {
       _startDate.text = formatIsoDate(DateTime.now());
     }
+    _startDate.addListener(_recalculateBookedDays);
+    _endDate.addListener(_recalculateBookedDays);
+  }
+
+  /// Picking a start and return date fills in the booked days (nights,
+  /// minimum one). The field stays editable, so an agreed different figure
+  /// can still be typed over it.
+  void _recalculateBookedDays() {
+    final days = bookedDaysBetween(_startDate.text, _endDate.text);
+    if (days == null) return;
+    final text = days.toString();
+    if (_bookDays.text != text) _bookDays.text = text;
   }
 
   @override
@@ -130,6 +142,8 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
 
   @override
   void dispose() {
+    _startDate.removeListener(_recalculateBookedDays);
+    _endDate.removeListener(_recalculateBookedDays);
     for (final c in [
       _startDate,
       _startTime,
@@ -200,16 +214,10 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
   String? _validateEndDate(String? value) =>
       Validate.dateOrder(value, _startDate.text);
 
-  /// Shown as a hint only. `book_days` stays exactly what the user entered
-  /// -- the source data shows the two don't always agree, so this never
-  /// overwrites it.
   String? get _durationHint {
-    final start = DateTime.tryParse(_startDate.text.trim());
-    final end = DateTime.tryParse(_endDate.text.trim());
-    if (start == null || end == null) return null;
-    final days = end.difference(start).inDays;
-    if (days < 0) return null;
-    return 'Selected dates span $days day${days == 1 ? '' : 's'}';
+    final days = bookedDaysBetween(_startDate.text, _endDate.text);
+    if (days == null) return null;
+    return 'Booked days set to $days — change it below if agreed otherwise';
   }
 
   Future<void> _save() async {
