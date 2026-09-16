@@ -1,10 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_services.dart';
 import 'auth/auth_service.dart';
+import 'auth/biometric_service.dart';
 import 'auth/email_link_landing.dart';
+import 'auth/enable_biometric_screen.dart';
+import 'auth/lock_screen.dart';
+import 'auth/secure_session_storage.dart';
 import 'auth/set_new_password_screen.dart';
 import 'auth/sign_in_screen.dart';
 import 'screens/shell_screen.dart';
@@ -23,11 +29,12 @@ Future<void> main() async {
   await Supabase.initialize(
     url: supabaseUrl,
     publishableKey: supabasePublishableKey,
-    // The session is held in memory only, never written to device storage,
-    // so every fresh launch starts signed out and asks for the password.
-    // (Default behaviour would silently restore the last session.)
-    authOptions: const FlutterAuthClientOptions(
-      localStorage: EmptyLocalStorage(),
+    authOptions: FlutterAuthClientOptions(
+      // On a phone the session is kept in the Keystore so fingerprint/face
+      // can unlock it on the next launch (see _BurhanAppState). On the web
+      // there is no biometric unlock, so nothing is persisted and every
+      // load asks for the password.
+      localStorage: kIsWeb ? const EmptyLocalStorage() : SecureSessionStorage(),
     ),
   );
   runApp(const BurhanApp());
@@ -35,8 +42,8 @@ Future<void> main() async {
 
 class BurhanApp extends StatefulWidget {
   /// Tests inject an already-open (FFI) database *and* skip auth entirely
-  /// -- production (this field null) requires email + password sign-in
-  /// before opening the on-device database.
+  /// -- production (this field null) requires sign-in before opening the
+  /// on-device database.
   final AppServices? services;
 
   const BurhanApp({super.key, this.services});
@@ -46,16 +53,59 @@ class BurhanApp extends StatefulWidget {
 }
 
 class _BurhanAppState extends State<BurhanApp> {
-  // `late`, not `final`: in test mode (widget.services != null) build()
-  // returns before this is ever read, so it must not construct eagerly --
-  // AuthService() touches Supabase.instance, which tests never initialize.
+  // `late`, not `final`: in test mode (widget.services != null) these are
+  // never read, so they must not construct eagerly -- AuthService() touches
+  // Supabase.instance, which tests never initialize.
   late final _authService = AuthService();
+  late final BiometricService _biometrics = DeviceBiometricService();
   Future<AppServices>? _servicesFuture;
+  StreamSubscription<AuthState>? _authSub;
+
+  /// True once the owner has proven who they are *this launch* -- by typing
+  /// the password, or by passing the biometric lock. A session restored
+  /// from storage starts locked; it never opens the app on its own.
+  bool _unlocked = false;
+
+  /// Set after a password sign-in until the "turn on fingerprint?" question
+  /// has been answered (or skipped because it doesn't apply).
+  bool _offerPending = false;
 
   /// Set once the landing link (if any) has been acted on, so a rebuild
   /// doesn't re-apply it.
   bool _landingHandled = false;
   bool _needsNewPassword = false;
+
+  /// Guards the one-shot discard of a restored session when biometric
+  /// unlock is off.
+  bool _discarding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.services != null) return;
+    _authSub = _authService.onAuthStateChange.listen((state) {
+      if (!mounted) return;
+      setState(() {
+        switch (state.event) {
+          case AuthChangeEvent.signedIn:
+            _unlocked = true;
+            _offerPending = true;
+          case AuthChangeEvent.signedOut:
+            _unlocked = false;
+            _offerPending = false;
+            _discarding = false;
+          default:
+            break;
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
 
   /// Only a recovery link changes the flow: it routes to the
   /// set-new-password screen. Confirmation links just land signed-in.
@@ -64,6 +114,7 @@ class _BurhanAppState extends State<BurhanApp> {
     _landingHandled = true;
     if (_openedFromEmailLink == EmailLinkType.recovery) {
       _needsNewPassword = true;
+      _unlocked = true; // the link itself is the proof
     }
   }
 
@@ -90,64 +141,113 @@ class _BurhanAppState extends State<BurhanApp> {
       );
     }
 
-    return StreamBuilder<AuthState>(
-      stream: _authService.onAuthStateChange,
-      initialData: AuthState(
-        AuthChangeEvent.initialSession,
-        _authService.currentSession,
-      ),
-      builder: (context, snapshot) {
-        final session = snapshot.data?.session ?? _authService.currentSession;
-        final user = session?.user;
+    final user = _authService.currentUser;
+    if (user == null) {
+      return _bareApp(theme, SignInScreen(authService: _authService));
+    }
 
-        if (user == null) {
+    _handleEmailLanding();
+
+    if (_needsNewPassword) {
+      return _bareApp(
+        theme,
+        SetNewPasswordScreen(
+          authService: _authService,
+          onDone: () => setState(() => _needsNewPassword = false),
+        ),
+      );
+    }
+
+    // A session came back from storage. Biometric unlock on -> lock screen.
+    // Off -> the saved session is discarded and the password is required,
+    // exactly as if nothing had been saved.
+    if (!_unlocked) {
+      return FutureBuilder<bool?>(
+        future: _biometrics.isEnabled(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData && !snapshot.hasError) {
+            return _bareApp(theme, const _Loading());
+          }
+          if (snapshot.data == true) {
+            return _bareApp(
+              theme,
+              LockScreen(
+                biometrics: _biometrics,
+                email: user.email,
+                onUnlocked: () => setState(() => _unlocked = true),
+                onUsePassword: _authService.signOutLocal,
+              ),
+            );
+          }
+          if (!_discarding) {
+            _discarding = true;
+            _authService.signOutLocal();
+          }
+          return _bareApp(theme, const _Loading());
+        },
+      );
+    }
+
+    // Just signed in with the password: offer biometric unlock once, if the
+    // phone has it and the owner hasn't already decided.
+    if (_offerPending) {
+      return FutureBuilder<bool>(
+        future: _shouldOfferBiometrics(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return _bareApp(theme, const _Loading());
+          if (snapshot.data != true) {
+            // Nothing to ask; fall through on the next frame.
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => setState(() => _offerPending = false),
+            );
+            return _bareApp(theme, const _Loading());
+          }
           return _bareApp(
             theme,
-            SignInScreen(authService: _authService),
+            EnableBiometricScreen(
+              biometrics: _biometrics,
+              onDone: () => setState(() => _offerPending = false),
+            ),
           );
-        }
+        },
+      );
+    }
 
-        _handleEmailLanding();
-
-        if (_needsNewPassword) {
+    _servicesFuture ??= AppServices.bootstrap();
+    return FutureBuilder<AppServices>(
+      future: _servicesFuture,
+      builder: (context, svcSnapshot) {
+        if (svcSnapshot.hasError) {
           return _bareApp(
             theme,
-            SetNewPasswordScreen(
-              authService: _authService,
-              onDone: () => setState(() => _needsNewPassword = false),
+            _ErrorMessage(
+              'Could not open the database:\n${svcSnapshot.error}',
             ),
           );
         }
-
-        _servicesFuture ??= AppServices.bootstrap();
-        return FutureBuilder<AppServices>(
-          future: _servicesFuture,
-          builder: (context, svcSnapshot) {
-            if (svcSnapshot.hasError) {
-              return _bareApp(
-                theme,
-                _ErrorMessage(
-                  'Could not open the database:\n${svcSnapshot.error}',
-                ),
-              );
-            }
-            if (!svcSnapshot.hasData) {
-              return _bareApp(theme, const _Loading());
-            }
-            svcSnapshot.data!.signOut = _authService.signOut;
-            return AppScope(
-              services: svcSnapshot.data!,
-              child: MaterialApp(
-                title: 'Burhan Rent-A-Car',
-                debugShowCheckedModeBanner: false,
-                theme: theme,
-                home: const ShellScreen(),
-              ),
-            );
-          },
+        if (!svcSnapshot.hasData) {
+          return _bareApp(theme, const _Loading());
+        }
+        final services = svcSnapshot.data!;
+        services.signOut = _authService.signOut;
+        services.biometrics = _biometrics;
+        return AppScope(
+          services: services,
+          child: MaterialApp(
+            title: 'Burhan Rent-A-Car',
+            debugShowCheckedModeBanner: false,
+            theme: theme,
+            home: const ShellScreen(),
+          ),
         );
       },
     );
+  }
+
+  Future<bool> _shouldOfferBiometrics() async {
+    if (kIsWeb) return false;
+    if (await _biometrics.isEnabled() != null) return false;
+    return _biometrics.isSupported();
   }
 
   Widget _bareApp(ThemeData theme, Widget home) {

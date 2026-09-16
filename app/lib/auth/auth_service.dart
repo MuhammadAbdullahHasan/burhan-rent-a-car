@@ -49,4 +49,9 @@ class AuthService {
   }
 
   Future<void> signOut() => _auth.signOut();
+
+  /// Drops the session on this device only, without a server round-trip --
+  /// used to fall back from the biometric lock to the password, and to
+  /// discard a restored session when biometric unlock is off. Works offline.
+  Future<void> signOutLocal() => _auth.signOut(scope: SignOutScope.local);
 }

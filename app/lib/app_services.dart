@@ -1,4 +1,6 @@
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
+
+import 'auth/biometric_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -24,6 +26,10 @@ class AppServices {
   /// Signs the owner out. Null when there is no auth layer (widget tests
   /// inject services directly), in which case the UI hides the action.
   Future<void> Function()? signOut;
+
+  /// Fingerprint/face preference, for the Home menu switch. Null without an
+  /// auth layer.
+  BiometricService? biometrics;
 
   AppServices._(this.db)
       : customers = CustomerRepository(),

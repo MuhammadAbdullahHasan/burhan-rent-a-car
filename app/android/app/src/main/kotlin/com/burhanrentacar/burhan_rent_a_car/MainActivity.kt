@@ -1,5 +1,7 @@
 package com.burhanrentacar.burhan_rent_a_car
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity: FlutterActivity()
+// FlutterFragmentActivity rather than FlutterActivity: the system biometric
+// prompt (fingerprint / face) requires a FragmentActivity host.
+class MainActivity: FlutterFragmentActivity()

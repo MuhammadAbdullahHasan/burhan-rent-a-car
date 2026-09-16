@@ -2,6 +2,7 @@ import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 
 import '../app_services.dart';
+import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
 import '../widgets/rental_tile.dart';
 import 'rental_detail_screen.dart';
@@ -120,10 +121,9 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.refresh),
           ),
           if (AppScope.of(context).signOut != null)
-            IconButton(
-              tooltip: 'Sign out',
-              onPressed: _signOut,
-              icon: const Icon(Icons.logout),
+            _AccountMenu(
+              biometrics: AppScope.of(context).biometrics,
+              onSignOut: _signOut,
             ),
         ],
       ),
@@ -245,6 +245,97 @@ class _HomeScreenState extends State<HomeScreen> {
 
   ShellScreenState? _shell(BuildContext context) =>
       context.findAncestorStateOfType<ShellScreenState>();
+}
+
+/// Account actions: the fingerprint/face switch (only when the phone
+/// supports it) and sign-out.
+class _AccountMenu extends StatefulWidget {
+  final BiometricService? biometrics;
+  final VoidCallback onSignOut;
+
+  const _AccountMenu({required this.biometrics, required this.onSignOut});
+
+  @override
+  State<_AccountMenu> createState() => _AccountMenuState();
+}
+
+class _AccountMenuState extends State<_AccountMenu> {
+  bool _supported = false;
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final b = widget.biometrics;
+    if (b == null) return;
+    final supported = await b.isSupported();
+    final enabled = await b.isEnabled() ?? false;
+    if (!mounted) return;
+    setState(() {
+      _supported = supported;
+      _enabled = enabled;
+    });
+  }
+
+  Future<void> _toggle() async {
+    final b = widget.biometrics!;
+    final messenger = ScaffoldMessenger.of(context);
+    if (_enabled) {
+      await b.setEnabled(false);
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Fingerprint / face sign-in turned off.'),
+      ));
+    } else {
+      final ok = await b.authenticate('Confirm to turn on fingerprint / face sign-in');
+      if (!ok) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text("Couldn't verify — fingerprint / face sign-in stays off."),
+        ));
+        return;
+      }
+      await b.setEnabled(true);
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Fingerprint / face sign-in turned on.'),
+      ));
+    }
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Account',
+      icon: const Icon(Icons.account_circle_outlined),
+      onSelected: (value) {
+        if (value == 'biometric') _toggle();
+        if (value == 'signout') widget.onSignOut();
+      },
+      itemBuilder: (context) => [
+        if (_supported)
+          PopupMenuItem(
+            value: 'biometric',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.fingerprint),
+              title: const Text('Fingerprint / face sign-in'),
+              trailing: Switch(value: _enabled, onChanged: null),
+            ),
+          ),
+        const PopupMenuItem(
+          value: 'signout',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.logout),
+            title: Text('Sign out'),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _QuickNav extends StatelessWidget {

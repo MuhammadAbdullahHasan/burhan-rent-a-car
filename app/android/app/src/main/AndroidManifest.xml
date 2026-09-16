@@ -2,6 +2,8 @@
     <!-- Sign-in talks to Supabase. Flutter's debug manifest grants this
          automatically; the release manifest does not. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Fingerprint / face unlock of the saved sign-in. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application
         android:label="Burhan Rent-A-Car"
         android:name="${applicationName}"
