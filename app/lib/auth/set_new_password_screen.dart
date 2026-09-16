@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'auth_error_message.dart';
 import 'auth_service.dart';
 
 /// Shown when the app is opened from a password-recovery link. The link
@@ -43,10 +42,8 @@ class _SetNewPasswordScreenState extends State<SetNewPasswordScreen> {
     try {
       await widget.authService.updatePassword(_password.text);
       widget.onDone();
-    } on AuthException catch (e) {
-      setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = 'Could not update the password: $e');
+      setState(() => _error = authErrorMessage(e, fallback: 'Could not update the password.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

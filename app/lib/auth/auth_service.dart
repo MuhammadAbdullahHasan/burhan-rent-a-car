@@ -1,31 +1,22 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Thin wrapper around Supabase Auth plus the app-level email second factor.
+/// Thin wrapper around Supabase Auth with authenticator-app (TOTP) MFA as a
+/// mandatory second step.
 ///
-/// Supabase's own MFA API only supports TOTP (authenticator app) and phone
-/// factors, not email -- so "email as a second step" is implemented at the
-/// app layer: after a password sign-in succeeds (which already establishes
-/// a Supabase session), the app stays locked until the user proves access
-/// to their inbox. That proof is accepted in EITHER of two forms, because
-/// which one arrives depends on the project's email template:
+/// Supabase tracks how strongly a session is authenticated as an
+/// "assurance level": `aal1` after a password alone, `aal2` once a TOTP
+/// code has been verified. That level lives in the session itself, so it
+/// survives reloads, drops back to `aal1` on every fresh sign-in (the code
+/// is required each login), and disappears on sign-out -- no app-side
+/// flag to keep in step. The app unlocks only at `aal2`.
 ///
-///  * typing the 6-digit code from the email ([verifyOtp]) -- only present
-///    if the Magic Link template includes `{{ .Token }}`; or
-///  * clicking the link in the email, which lands back on the app with a
-///    session in the URL ([markMfaVerified], called by the app on such a
-///    landing). Clicking a link that only the inbox owner could have
-///    received proves exactly what typing the code does.
-///
-/// [isMfaVerified] gates the app on that, tracked per signed-in user in
-/// platform secure storage and cleared on sign-out.
+/// Enrollment is enforced, not optional: a user with no verified factor is
+/// sent to enrol before anything else. This is a single-owner app, so that
+/// is the owner setting up their own second step once.
 class AuthService {
   final SupabaseClient? _clientOverride;
-  final FlutterSecureStorage _storage;
 
-  AuthService({SupabaseClient? client, FlutterSecureStorage? storage})
-      : _clientOverride = client,
-        _storage = storage ?? const FlutterSecureStorage();
+  AuthService({SupabaseClient? client}) : _clientOverride = client;
 
   // Lazy: constructing AuthService() must not itself touch Supabase.instance
   // -- widget tests build screens with a default AuthService() purely to
@@ -39,15 +30,7 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
   Stream<AuthState> get onAuthStateChange => _auth.onAuthStateChange;
 
-  String _mfaKey(String userId) => 'mfa_verified_$userId';
-
-  Future<bool> isMfaVerified(String userId) async {
-    return (await _storage.read(key: _mfaKey(userId))) == 'true';
-  }
-
-  Future<void> markMfaVerified(String userId) async {
-    await _storage.write(key: _mfaKey(userId), value: 'true');
-  }
+  // ---- password -----------------------------------------------------------
 
   Future<void> signInWithPassword({
     required String email,
@@ -56,10 +39,7 @@ class AuthService {
     return _auth.signInWithPassword(email: email, password: password);
   }
 
-  Future<void> signUp({
-    required String email,
-    required String password,
-  }) {
+  Future<void> signUp({required String email, required String password}) {
     return _auth.signUp(email: email, password: password);
   }
 
@@ -80,29 +60,50 @@ class AuthService {
     return _auth.updateUser(UserAttributes(password: newPassword));
   }
 
-  /// Sends the second-step email to the already-authenticated user's own
-  /// address. Never takes a free-typed address, so it can't be redirected.
-  Future<void> sendOtp() async {
-    final email = currentUser?.email;
-    if (email == null) {
-      throw StateError('sendOtp() requires a signed-in user with an email.');
-    }
-    await _auth.signInWithOtp(email: email);
+  Future<void> signOut() => _auth.signOut();
+
+  // ---- authenticator-app second step ---------------------------------------
+
+  /// Whether the current session has passed the second step.
+  bool isFullyVerified() {
+    final level = _auth.mfa.getAuthenticatorAssuranceLevel();
+    return level.currentLevel == AuthenticatorAssuranceLevels.aal2;
   }
 
-  Future<void> verifyOtp(String code) async {
-    final email = currentUser?.email;
-    if (email == null) {
-      throw StateError('verifyOtp() requires a signed-in user with an email.');
-    }
-    await _auth.verifyOTP(type: OtpType.email, email: email, token: code);
-    final userId = currentUser?.id;
-    if (userId != null) await markMfaVerified(userId);
+  /// The user's verified authenticator factor, or null if none is enrolled.
+  Future<Factor?> verifiedTotpFactor() async {
+    final factors = await _auth.mfa.listFactors();
+    return factors.totp.isEmpty ? null : factors.totp.first;
   }
 
-  Future<void> signOut() async {
-    final userId = currentUser?.id;
-    if (userId != null) await _storage.delete(key: _mfaKey(userId));
-    await _auth.signOut();
+  /// Starts enrolment. Any half-finished (unverified) factor from an earlier
+  /// abandoned attempt is discarded first, so the user always scans exactly
+  /// the QR code that will be verified.
+  Future<AuthMFAEnrollResponse> enrollTotp() async {
+    final existing = await _auth.mfa.listFactors();
+    for (final f in existing.all) {
+      if (f.status == FactorStatus.unverified) {
+        await _auth.mfa.unenroll(f.id);
+      }
+    }
+    return _auth.mfa.enroll(
+      factorType: FactorType.totp,
+      friendlyName: 'Burhan Rent-A-Car',
+      issuer: 'Burhan Rent-A-Car',
+    );
+  }
+
+  /// Checks a 6-digit code from the authenticator app against [factorId].
+  /// On success the session is upgraded to `aal2`.
+  Future<void> verifyTotp({
+    required String factorId,
+    required String code,
+  }) async {
+    final challenge = await _auth.mfa.challenge(factorId: factorId);
+    await _auth.mfa.verify(
+      factorId: factorId,
+      challengeId: challenge.id,
+      code: code,
+    );
   }
 }

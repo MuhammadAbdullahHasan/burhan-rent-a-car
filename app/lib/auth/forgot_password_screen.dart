@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'auth_error_message.dart';
 import 'auth_service.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -34,10 +33,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     try {
       await widget.authService.sendPasswordResetEmail(_email.text.trim());
       if (mounted) setState(() => _sent = true);
-    } on AuthException catch (e) {
-      setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = 'Could not send the reset email: $e');
+      setState(() => _error = authErrorMessage(e, fallback: 'Could not send the reset email.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -24,10 +24,7 @@ android {
         applicationId = "com.burhanrentacar.burhan_rent_a_car"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // 23 (Android 6.0, 2015) rather than Flutter's default 21: required
-        // by flutter_secure_storage, which backs the auth session/MFA flag
-        // with the Android Keystore. No supported business phone is older.
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

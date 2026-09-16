@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'auth_error_message.dart';
 import 'auth_service.dart';
 
 /// Creates the owner's account. This app has exactly one owner -- once that
@@ -45,10 +44,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
         password: _password.text,
       );
       if (mounted) setState(() => _done = true);
-    } on AuthException catch (e) {
-      setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = 'Could not create the account: $e');
+      setState(() => _error = authErrorMessage(e, fallback: 'Could not create the account.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

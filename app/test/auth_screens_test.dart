@@ -22,8 +22,18 @@ void main() {
       await t.tap(find.text('Sign In'));
       await t.pump();
 
-      expect(find.text('Enter a valid email'), findsOneWidget);
+      expect(find.text('Enter your email'), findsOneWidget);
       expect(find.text('Enter your password'), findsOneWidget);
+    });
+
+    testWidgets('rejects an email without a domain', (t) async {
+      await pump(t, SignInScreen(authService: AuthService()));
+
+      await t.enterText(find.widgetWithText(TextFormField, 'Email'), 'owner@nowhere');
+      await t.tap(find.text('Sign In'));
+      await t.pump();
+
+      expect(find.text('Enter a valid email address'), findsOneWidget);
     });
 
     testWidgets('password field starts obscured and can be revealed',

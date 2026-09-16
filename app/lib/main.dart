@@ -5,7 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_services.dart';
 import 'auth/auth_service.dart';
 import 'auth/email_link_landing.dart';
-import 'auth/otp_verification_screen.dart';
+import 'auth/mfa_challenge_screen.dart';
+import 'auth/mfa_enroll_screen.dart';
 import 'auth/set_new_password_screen.dart';
 import 'auth/sign_in_screen.dart';
 import 'screens/shell_screen.dart';
@@ -30,8 +31,8 @@ Future<void> main() async {
 
 class BurhanApp extends StatefulWidget {
   /// Tests inject an already-open (FFI) database *and* skip auth entirely
-  /// -- production (this field null) requires sign-in + an email second
-  /// step before opening the on-device database.
+  /// -- production (this field null) requires sign-in + an authenticator
+  /// code before opening the on-device database.
   final AppServices? services;
 
   const BurhanApp({super.key, this.services});
@@ -52,18 +53,27 @@ class _BurhanAppState extends State<BurhanApp> {
   bool _landingHandled = false;
   bool _needsNewPassword = false;
 
-  /// A confirmation or magic link clicked from the inbox is proof of inbox
-  /// access -- the same thing typing the OTP code proves -- so it satisfies
-  /// the second step. A recovery link additionally routes to the
-  /// set-new-password screen first.
-  Future<void> _handleEmailLanding(User user) async {
+  /// Bumped after enrolment/verification so the MFA check below re-runs.
+  int _mfaRevision = 0;
+
+  /// Only a recovery link changes the flow: it routes to the
+  /// set-new-password screen. Confirmation links just land signed-in, and
+  /// the authenticator step still applies.
+  void _handleEmailLanding() {
     if (_landingHandled) return;
     _landingHandled = true;
-    final type = _openedFromEmailLink;
-    if (type == null) return;
-    await _authService.markMfaVerified(user.id);
-    if (type == EmailLinkType.recovery) _needsNewPassword = true;
-    if (mounted) setState(() {});
+    if (_openedFromEmailLink == EmailLinkType.recovery) {
+      _needsNewPassword = true;
+    }
+  }
+
+  Future<_MfaState> _loadMfaState() async {
+    final factor = await _authService.verifiedTotpFactor();
+    if (factor == null) return const _MfaState.needsEnrollment();
+    final verified = _authService.isFullyVerified();
+    return verified
+        ? const _MfaState.verified()
+        : _MfaState.needsChallenge(factor.id);
   }
 
   /// Every branch below returns its OWN complete `MaterialApp` (or, once
@@ -107,10 +117,7 @@ class _BurhanAppState extends State<BurhanApp> {
           );
         }
 
-        if (!_landingHandled && _openedFromEmailLink != null) {
-          _handleEmailLanding(user);
-          return _bareApp(theme, const _Loading());
-        }
+        _handleEmailLanding();
 
         if (_needsNewPassword) {
           return _bareApp(
@@ -122,20 +129,38 @@ class _BurhanAppState extends State<BurhanApp> {
           );
         }
 
-        return FutureBuilder<bool>(
-          key: ValueKey('mfa-${user.id}'),
-          future: _authService.isMfaVerified(user.id),
+        return FutureBuilder<_MfaState>(
+          key: ValueKey('mfa-${user.id}-$_mfaRevision'),
+          future: _loadMfaState(),
           builder: (context, mfaSnapshot) {
-            if (!mfaSnapshot.hasData) {
-              return _bareApp(theme, const _Loading());
-            }
-            if (mfaSnapshot.data != true) {
+            if (mfaSnapshot.hasError) {
               return _bareApp(
                 theme,
-                OtpVerificationScreen(
+                _ErrorMessage(
+                  'Could not check sign-in status:\n${mfaSnapshot.error}',
+                ),
+              );
+            }
+            final mfa = mfaSnapshot.data;
+            if (mfa == null) {
+              return _bareApp(theme, const _Loading());
+            }
+            if (mfa.needsEnrollment) {
+              return _bareApp(
+                theme,
+                MfaEnrollScreen(
                   authService: _authService,
-                  email: user.email ?? '',
-                  onVerified: () => setState(() {}),
+                  onEnrolled: () => setState(() => _mfaRevision++),
+                ),
+              );
+            }
+            if (mfa.challengeFactorId != null) {
+              return _bareApp(
+                theme,
+                MfaChallengeScreen(
+                  authService: _authService,
+                  factorId: mfa.challengeFactorId!,
+                  onVerified: () => setState(() => _mfaRevision++),
                 ),
               );
             }
@@ -180,6 +205,22 @@ class _BurhanAppState extends State<BurhanApp> {
       home: home,
     );
   }
+}
+
+/// Where the signed-in user is relative to the authenticator step.
+class _MfaState {
+  final bool needsEnrollment;
+  final String? challengeFactorId;
+
+  const _MfaState.needsEnrollment()
+      : needsEnrollment = true,
+        challengeFactorId = null;
+  const _MfaState.needsChallenge(String factorId)
+      : needsEnrollment = false,
+        challengeFactorId = factorId;
+  const _MfaState.verified()
+      : needsEnrollment = false,
+        challengeFactorId = null;
 }
 
 class _Loading extends StatelessWidget {

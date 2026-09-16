@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'auth_error_message.dart';
 import 'auth_service.dart';
 import 'forgot_password_screen.dart';
 import 'sign_up_screen.dart';
@@ -46,20 +45,13 @@ class _SignInScreenState extends State<SignInScreen> {
       );
       // On success the auth stream in main.dart moves the app to the
       // second step on its own -- nothing further to do here.
-    } on AuthException catch (e) {
-      // Supabase's exact message for an account whose confirmation link was
-      // never clicked. Surfaced specifically, with a way out, because the
-      // generic wording reads like a wrong password.
-      final unconfirmed = e.message.toLowerCase().contains('not confirmed');
-      setState(() {
-        _unconfirmed = unconfirmed;
-        _error = unconfirmed
-            ? 'This email hasn\'t been confirmed yet. Check your inbox '
-                '(and spam) for the confirmation link, or resend it below.'
-            : e.message;
-      });
     } catch (e) {
-      setState(() => _error = 'Could not sign in: $e');
+      // An unconfirmed account gets a resend action; everything else is a
+      // plain message the owner can act on.
+      setState(() {
+        _unconfirmed = isUnconfirmedEmailError(e);
+        _error = authErrorMessage(e, fallback: 'Could not sign in.');
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -73,11 +65,18 @@ class _SignInScreenState extends State<SignInScreen> {
         _resent = true;
         _error = 'Confirmation email sent again to ${_email.text.trim()}.';
       });
-    } on AuthException catch (e) {
-      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = authErrorMessage(
+            e,
+            fallback: 'Could not resend the confirmation email.',
+          ));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _clearError() {
+    if (_error != null) setState(() => _error = null);
   }
 
   @override
@@ -150,20 +149,38 @@ class _SignInScreenState extends State<SignInScreen> {
                     ],
                     TextFormField(
                       controller: _email,
+                      enabled: !_loading,
+                      autofocus: true,
                       keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
                       autofillHints: const [AutofillHints.email],
-                      decoration: const InputDecoration(labelText: 'Email'),
-                      validator: (v) => (v == null || !v.contains('@'))
-                          ? 'Enter a valid email'
-                          : null,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                      onChanged: (_) => _clearError(),
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        prefixIcon: Icon(Icons.mail_outline),
+                      ),
+                      validator: (v) {
+                        final value = v?.trim() ?? '';
+                        if (value.isEmpty) return 'Enter your email';
+                        if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                            .hasMatch(value)) {
+                          return 'Enter a valid email address';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _password,
+                      enabled: !_loading,
                       obscureText: _obscure,
+                      textInputAction: TextInputAction.done,
                       autofillHints: const [AutofillHints.password],
+                      onChanged: (_) => _clearError(),
                       decoration: InputDecoration(
                         labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock_outline),
                         suffixIcon: IconButton(
                           icon: Icon(
                             _obscure
@@ -197,7 +214,15 @@ class _SignInScreenState extends State<SignInScreen> {
                     const SizedBox(height: 8),
                     FilledButton(
                       onPressed: _loading ? null : _submit,
-                      child: Text(_loading ? 'Signing in…' : 'Sign In'),
+                      child: _loading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                              ),
+                            )
+                          : const Text('Sign In'),
                     ),
                     const SizedBox(height: 16),
                     TextButton(
