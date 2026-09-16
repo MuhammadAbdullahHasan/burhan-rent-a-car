@@ -39,11 +39,23 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
   final _refContact = TextEditingController();
   final _refRelation = TextEditingController();
 
+  /// New rentals default to typing a NEW customer in, because that is the
+  /// common case; picking a repeat customer is the alternative. Editing
+  /// always works with the rental's existing customer link.
+  bool _useExistingCustomer = false;
+  final _custName = TextEditingController();
+  final _custPhone = TextEditingController();
+  final _custCnic = TextEditingController();
+  final _custLicense = TextEditingController();
+  final _custLicenseCity = TextEditingController();
+
   Map<String, Object?>? _customer;
   Map<String, Object?>? _vehicle;
   String _status = 'Open';
   bool _saving = false;
   bool _linkError = false;
+
+  bool get _typingNewCustomer => !_isEdit && !_useExistingCustomer;
 
   /// Photo taken while filling in a new rental; stored once the rental
   /// exists. (An existing rental's photo is managed from its detail screen.)
@@ -130,6 +142,11 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
       _refName,
       _refContact,
       _refRelation,
+      _custName,
+      _custPhone,
+      _custCnic,
+      _custLicense,
+      _custLicenseCity,
     ]) {
       c.dispose();
     }
@@ -197,15 +214,14 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
 
   Future<void> _save() async {
     final formValid = _formKey.currentState!.validate();
-    final linksValid = _customer != null && _vehicle != null;
+    final customerValid = _typingNewCustomer || _customer != null;
+    final linksValid = customerValid && _vehicle != null;
     setState(() => _linkError = !linksValid);
 
     if (!formValid || !linksValid) {
       if (!linksValid) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Select both a customer and a vehicle.'),
-          ),
+          SnackBar(content: Text(_linkMessage)),
         );
       }
       return;
@@ -217,6 +233,15 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
+      if (_typingNewCustomer) {
+        final customerId = await _resolveNewCustomer(services);
+        if (customerId == null) {
+          if (mounted) setState(() => _saving = false);
+          return;
+        }
+        _customer = {'id': customerId};
+      }
+
       if (_isEdit) {
         // rental_no is deliberately absent: an assigned number is immutable.
         await services.engine.queueUpdate(
@@ -292,6 +317,78 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
     }
   }
 
+  String get _linkMessage => _typingNewCustomer
+      ? 'Select a vehicle.'
+      : _customer == null && _vehicle == null
+          ? 'A rental needs both a customer and a vehicle.'
+          : _customer == null
+              ? 'Select a customer.'
+              : 'Select a vehicle.';
+
+  /// Creates the typed-in customer and returns its id -- unless the phone
+  /// or CNIC already belongs to someone, in which case the owner chooses
+  /// between linking that customer and creating a separate record (the
+  /// import pipeline's rule: match by phone, then CNIC, never by name).
+  /// Null means the owner cancelled.
+  Future<String?> _resolveNewCustomer(AppServices services) async {
+    final phoneNorm = normalizeDigits(_custPhone.text);
+    final cnicNorm = normalizeDigits(_custCnic.text);
+    final existing = await services.customers.findByPhoneOrCnic(
+      services.db,
+      phoneNormalized: phoneNorm,
+      cnicNormalized: cnicNorm,
+    );
+    if (existing != null && mounted) {
+      final choice = await showDialog<_DuplicateChoice>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Repeat customer?'),
+          content: Text(
+            '${displayOrNA(existing['full_name'])} '
+            '(${displayOrNA(existing['phone'])}) already has this phone or '
+            'CNIC.\n\nUse that customer for this rental, or create a '
+            'separate record? Records are never merged.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, _DuplicateChoice.cancel),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(context, _DuplicateChoice.createSeparate),
+              child: const Text('Create separate'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(context, _DuplicateChoice.useExisting),
+              child: const Text('Use existing'),
+            ),
+          ],
+        ),
+      );
+      switch (choice) {
+        case _DuplicateChoice.useExisting:
+          return existing['id'] as String;
+        case _DuplicateChoice.createSeparate:
+          break;
+        case _DuplicateChoice.cancel:
+        case null:
+          return null;
+      }
+    }
+    return services.engine.createCustomer(
+      services.db,
+      fullName: _text(_custName),
+      phone: _text(_custPhone),
+      phoneNormalized: phoneNorm,
+      cnic: _text(_custCnic),
+      cnicNormalized: cnicNorm,
+      licenseNo: _text(_custLicense),
+      licenseCity: _text(_custLicenseCity),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -309,21 +406,82 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
           children: [
             _numberBanner(theme),
             FormSection(
-              title: 'CUSTOMER & VEHICLE',
+              title: 'CUSTOMER',
               children: [
-                _PickerTile(
-                  icon: Icons.person,
-                  label: 'Customer *',
-                  value: _customer == null
-                      ? null
-                      : displayOrNA(_customer!['full_name']),
-                  subtitle: _customer == null
-                      ? null
-                      : displayOrNA(_customer!['phone']),
-                  hasError: _linkError && _customer == null,
-                  onTap: _pickCustomer,
-                ),
-                const SizedBox(height: 12),
+                if (!_isEdit) ...[
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(
+                        value: false,
+                        icon: Icon(Icons.person_add_alt_1),
+                        label: Text('New customer'),
+                      ),
+                      ButtonSegment(
+                        value: true,
+                        icon: Icon(Icons.person_search),
+                        label: Text('Existing customer'),
+                      ),
+                    ],
+                    selected: {_useExistingCustomer},
+                    onSelectionChanged: (selection) => setState(() {
+                      _useExistingCustomer = selection.first;
+                      _linkError = false;
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (_typingNewCustomer) ...[
+                  AppTextField(
+                    controller: _custName,
+                    label: 'Full name',
+                    required: true,
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                  AppTextField(
+                    controller: _custPhone,
+                    label: 'Phone',
+                    keyboardType: TextInputType.phone,
+                    validator: Validate.phone,
+                    helper: 'Used to recognise repeat customers',
+                  ),
+                  AppTextField(
+                    controller: _custCnic,
+                    label: 'CNIC',
+                    hint: '42201-1234567-1',
+                    validator: Validate.cnic,
+                  ),
+                  FormRow(
+                    children: [
+                      AppTextField(
+                        controller: _custLicense,
+                        label: 'License #',
+                      ),
+                      AppTextField(
+                        controller: _custLicenseCity,
+                        label: 'License city',
+                        textCapitalization: TextCapitalization.words,
+                      ),
+                    ],
+                  ),
+                ] else
+                  _PickerTile(
+                    icon: Icons.person,
+                    label: 'Customer *',
+                    value: _customer == null
+                        ? null
+                        : displayOrNA(_customer!['full_name']),
+                    subtitle: _customer == null
+                        ? null
+                        : displayOrNA(_customer!['phone']),
+                    hasError: _linkError && _customer == null,
+                    onTap: _pickCustomer,
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+            FormSection(
+              title: 'VEHICLE',
+              children: [
                 _PickerTile(
                   icon: Icons.directions_car,
                   label: 'Vehicle *',
@@ -342,7 +500,7 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8, bottom: 4),
                     child: Text(
-                      'A rental needs both a customer and a vehicle.',
+                      _linkMessage,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.error,
                       ),
@@ -545,6 +703,8 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
     return t.isEmpty ? null : t;
   }
 }
+
+enum _DuplicateChoice { useExisting, createSeparate, cancel }
 
 String _numberText(Object? value) {
   if (value == null) return '';

@@ -45,15 +45,48 @@ void main() {
       expect(find.textContaining('never reused'), findsOneWidget);
     });
 
-    testWidgets('refuses to save without a customer and vehicle', (t) async {
+    testWidgets('opens with a new customer to type in, not a picker',
+        (t) async {
       await openNewRentalForm(t);
+      expect(find.text('New customer'), findsOneWidget);
+      expect(find.text('Existing customer'), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, 'Full name *'), findsOneWidget);
+      expect(find.text('Customer *'), findsNothing);
+    });
+
+    testWidgets('refuses to save without a vehicle', (t) async {
+      await openNewRentalForm(t);
+      await enterFieldText(t, 'Full name *', 'Someone New');
       await tapButton(t, 'Create Rental');
 
+      expect(find.text('Select a vehicle.'), findsWidgets);
+      // Nothing was written -- not even the customer.
+      await t.runAsync(() async {
+        final pending = await services.db.query(
+          'rentals',
+          where: 'rental_no IS NULL',
+        );
+        expect(pending, isEmpty);
+        final customers = await services.db.query(
+          'customers',
+          where: 'full_name = ?',
+          whereArgs: ['Someone New'],
+        );
+        expect(customers, isEmpty);
+      });
+    });
+
+    testWidgets('refuses to save without a customer and vehicle when picking',
+        (t) async {
+      await openNewRentalForm(t);
+      await tapAndSettle(t, find.text('Existing customer'));
+      await tapButton(t, 'Create Rental');
+
+      // Shown inline under the vehicle picker and as a SnackBar.
       expect(
         find.text('A rental needs both a customer and a vehicle.'),
-        findsOneWidget,
+        findsWidgets,
       );
-      // Nothing was written.
       await t.runAsync(() async {
         final pending = await services.db.query(
           'rentals',
@@ -88,6 +121,7 @@ void main() {
         (t) async {
       await openNewRentalForm(t);
 
+      await tapAndSettle(t, find.text('Existing customer'));
       await tapAndSettle(t, find.text('Tap to select').first);
       await tapAndSettle(t, find.text('Billa Khan').first);
 
@@ -105,6 +139,75 @@ void main() {
         expect(pending, hasLength(1));
         expect(pending.single['amount'], 5000.0);
         expect(rentalDisplayNumber(pending.single), startsWith('Pending #'));
+      });
+    });
+
+    testWidgets('a typed-in new customer is created with the rental',
+        (t) async {
+      await openNewRentalForm(t);
+      await enterFieldText(t, 'Full name *', 'Fresh Face');
+      await enterFieldText(t, 'Phone', '0345-7654321');
+      await tapAndSettle(t, find.text('Tap to select').first);
+      await tapAndSettle(t, find.text('KHI-123').first);
+      await enterFieldText(t, 'Amount', '5000');
+      await tapButton(t, 'Create Rental');
+
+      await t.runAsync(() async {
+        final customer = (await services.db.query(
+          'customers',
+          where: 'full_name = ?',
+          whereArgs: ['Fresh Face'],
+        ))
+            .single;
+        expect(customer['phone_normalized'], '03457654321');
+        final pending = (await services.db.query(
+          'rentals',
+          where: 'rental_no IS NULL AND is_deleted = 0',
+        ))
+            .single;
+        expect(pending['customer_id'], customer['id']);
+        // Customer is queued before the rental, so it reaches the server first.
+        final queue = await services.db.query(
+          'sync_queue',
+          orderBy: 'created_at ASC, rowid ASC',
+        );
+        final types = queue.map((q) => q['entity_type']).toList();
+        expect(types.indexOf('customer'), lessThan(types.indexOf('rental')));
+      });
+    });
+
+    testWidgets('a typed phone that belongs to a repeat customer offers to '
+        'use them instead of duplicating', (t) async {
+      await openNewRentalForm(t);
+      await enterFieldText(t, 'Full name *', 'B. Khan');
+      await enterFieldText(t, 'Phone', '03001234567'); // Billa Khan's
+      await tapAndSettle(t, find.text('Tap to select').first);
+      await tapAndSettle(t, find.text('KHI-123').first);
+      await tapButton(t, 'Create Rental');
+
+      expect(find.text('Repeat customer?'), findsOneWidget);
+      expect(find.textContaining('Billa Khan'), findsOneWidget);
+      await tapAndSettle(t, find.text('Use existing'));
+
+      await t.runAsync(() async {
+        final byName = await services.db.query(
+          'customers',
+          where: 'full_name = ?',
+          whereArgs: ['B. Khan'],
+        );
+        expect(byName, isEmpty, reason: 'no duplicate customer created');
+        final billa = (await services.db.query(
+          'customers',
+          where: 'phone_normalized = ?',
+          whereArgs: ['03001234567'],
+        ))
+            .single;
+        final pending = (await services.db.query(
+          'rentals',
+          where: 'rental_no IS NULL AND is_deleted = 0',
+        ))
+            .single;
+        expect(pending['customer_id'], billa['id']);
       });
     });
   });

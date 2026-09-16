@@ -170,18 +170,33 @@ class CloudSyncEngine {
     );
 
     if (row['rental_no'] == null) {
-      final response = await client.rpc('allocate_rental_no');
-      final rentalNo = (response as num).toInt();
-      await db.update(
-        'rentals',
-        {'rental_no': rentalNo},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      row = {...row, 'rental_no': rentalNo};
+      row = {...row, 'rental_no': await _allocateNumber(id)};
     }
 
-    await client.from('rentals').upsert(_rentalToRemote(row));
+    try {
+      await client.from('rentals').upsert(_rentalToRemote(row));
+    } on PostgrestException catch (e) {
+      // A number this device held without the server ever storing it
+      // (assigned by the pre-cloud local stand-in, or allocated but then
+      // refused for another reason) has since been taken. It was never a
+      // confirmed number, so the server issues the real one now.
+      final numberTaken = e.code == '23505' && e.message.contains('rental_no');
+      if (!numberTaken || !await _createdLocally('rental', id)) rethrow;
+      row = {...row, 'rental_no': await _allocateNumber(id)};
+      await client.from('rentals').upsert(_rentalToRemote(row));
+    }
+  }
+
+  Future<int> _allocateNumber(String rentalId) async {
+    final response = await client.rpc('allocate_rental_no');
+    final rentalNo = (response as num).toInt();
+    await db.update(
+      'rentals',
+      {'rental_no': rentalNo},
+      where: 'id = ?',
+      whereArgs: [rentalId],
+    );
+    return rentalNo;
   }
 
   /// A rental's customer/vehicle must exist on the server before the
@@ -455,7 +470,13 @@ class CloudSyncEngine {
     /// The cloud id a local reference should point at, or null when the
     /// referenced row has no twin (it is then kept and sent up as new).
     Future<String?> resolve(String table, String id) async {
-      if (created[_typeOf(table)]!.contains(id)) return id;
+      // A row created here keeps its id -- unless the pull already replaced
+      // it with a cloud row carrying the same registration / number, in
+      // which case that cloud row is its twin.
+      if (created[_typeOf(table)]!.contains(id) &&
+          await _rowById(table, id) != null) {
+        return id;
+      }
       final mapped = twin[table]![id];
       if (mapped != null) return mapped;
       final row = before[table]![id];
@@ -500,11 +521,18 @@ class CloudSyncEngine {
       }
     }
 
-    // 2. Rentals created here -> point at cloud customers/vehicles.
+    // 2. Rentals created here -> point at cloud customers/vehicles. One the
+    //    server does not hold yet also gives up any number it carries: that
+    //    number was never confirmed (pre-cloud stand-in, or allocated but
+    //    then refused), and the server issues the real one on push. A
+    //    rental the server already stores keeps its number, untouched.
     for (final id in created['rental']!) {
       final row = await _rowById('rentals', id);
       if (row == null) continue;
       final updates = <String, Object?>{};
+      if (!pulled['rentals']!.contains(id) && row['rental_no'] != null) {
+        updates['rental_no'] = null;
+      }
       for (final (column, parent) in _rentalParents) {
         final ref = row[column] as String?;
         if (ref == null) continue;

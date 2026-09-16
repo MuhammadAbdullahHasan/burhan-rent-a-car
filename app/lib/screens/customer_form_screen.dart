@@ -51,19 +51,11 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
   /// CNIC, never name alone. Warns rather than blocks -- two people can
   /// legitimately share a landline, and the owner decides.
   Future<Map<String, Object?>?> _findExisting(AppServices services) async {
-    final phoneNorm = normalizeDigits(_phone.text);
-    final cnicNorm = normalizeDigits(_cnic.text);
-    Map<String, Object?>? match;
-    if (phoneNorm != null) {
-      match = await services.customers.findByPhoneNormalized(
-        services.db,
-        phoneNorm,
-      );
-    }
-    match ??= cnicNorm == null
-        ? null
-        : await services.customers.findByCnicNormalized(services.db, cnicNorm);
-
+    final match = await services.customers.findByPhoneOrCnic(
+      services.db,
+      phoneNormalized: normalizeDigits(_phone.text),
+      cnicNormalized: normalizeDigits(_cnic.text),
+    );
     if (match == null) return null;
     if (_isEdit && match['id'] == widget.customer!['id']) return null;
     return match;

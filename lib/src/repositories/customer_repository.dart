@@ -20,6 +20,23 @@ class CustomerRepository {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// The conservative repeat-customer match: normalized phone first, then
+  /// CNIC, never name. Null when neither is given or nothing matches.
+  Future<Map<String, Object?>?> findByPhoneOrCnic(
+    DatabaseExecutor db, {
+    String? phoneNormalized,
+    String? cnicNormalized,
+  }) async {
+    if (phoneNormalized != null) {
+      final byPhone = await findByPhoneNormalized(db, phoneNormalized);
+      if (byPhone != null) return byPhone;
+    }
+    if (cnicNormalized != null) {
+      return findByCnicNormalized(db, cnicNormalized);
+    }
+    return null;
+  }
+
   Future<Map<String, Object?>?> findByCnicNormalized(
     DatabaseExecutor db,
     String cnicNormalized,

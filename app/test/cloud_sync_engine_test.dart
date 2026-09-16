@@ -269,14 +269,26 @@ void main() {
       status: 'Open',
     );
 
+    // (f) meanwhile another device already took #61 on the server -- the
+    //     number this device's legacy rental holds locally.
+    final taken = Map<String, Object?>.from(
+      server.tables['rentals']!.values.firstWhere((r) => r['rental_no'] == 60),
+    )
+      ..['id'] = 'taken-61'
+      ..['rental_no'] = 61
+      ..['updated_at'] = '2026-09-16T00:00:00.000Z';
+    server.tables['rentals']!['taken-61'] = taken;
+
     final summary = await engineFor(db).syncNow();
     expect(summary.failed, 0, reason: summary.error);
     expect(summary.error, isNull);
 
-    // Local now mirrors the cloud dataset plus the owner's three rentals.
-    expect(await _count(db, 'rentals'), 63);
+    // Local now mirrors the cloud dataset (60 + the taken #61) plus the
+    // owner's three rentals.
+    expect(await _count(db, 'rentals'), 64);
     expect(await _count(db, 'customers'), 11);
     expect(await _count(db, 'vehicles'), 3);
+    expect(server.tables['vehicles']!.length, 3);
     final serverRentalIds = server.tables['rentals']!.keys.toSet();
     for (final r in await db.query('rentals')) {
       expect(serverRentalIds, contains(r['id']));
@@ -312,13 +324,19 @@ void main() {
     expect(server23['remarks'], 'Returned on time');
     expect(server23['id'], isNot(seedRental23['id']));
 
-    // Numbers 61, 62, 63 were handed out, never reused, never skipped.
+    // #61 stayed with the device that had it stored first; this device's
+    // legacy #61 was re-numbered by the server. Nothing reused or skipped.
     final top = server.tables['rentals']!.values
         .map((r) => r['rental_no'] as int)
         .where((n) => n > 60)
         .toList()
       ..sort();
-    expect(top, [61, 62, 63]);
+    expect(top, [61, 62, 63, 64]);
+    expect(server.tables['rentals']!['taken-61']!['rental_no'], 61);
+    final legacy =
+        (await db.query('rentals', where: 'id = ?', whereArgs: [legacyId]))
+            .first;
+    expect(legacy['rental_no'], isNot(61));
     expect(await _count(db, 'sync_queue', "status = 'pending'"), 0);
     await db.close();
   });
