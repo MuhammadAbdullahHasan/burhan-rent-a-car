@@ -1,7 +1,11 @@
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 
 import 'auth/biometric_service.dart';
+import 'backup/cloud_backup.dart';
+import 'sync/auto_sync_engine.dart';
 import 'sync/cloud_sync_engine.dart';
+import 'sync/sync_actions.dart';
+import 'sync/sync_status.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -21,7 +25,7 @@ class AppServices {
   final RentalRepository rentals;
   final AttachmentRepository attachments;
   final UniversalSearchService search;
-  final LocalSyncEngine engine;
+  late final LocalSyncEngine engine;
 
   /// Signs the owner out. Null when there is no auth layer (widget tests
   /// inject services directly), in which case the UI hides the action.
@@ -36,17 +40,40 @@ class AppServices {
   /// when this is null, so screens never need to check it themselves.
   CloudSyncEngine? cloudSync;
 
+  /// Daily snapshots + manual restore; null without a cloud (tests).
+  CloudBackup? cloudBackup;
+
   /// Bumped after any sync that changed local rows, so open screens can
   /// reload without the owner having to navigate away and back.
   final ValueNotifier<int> dataChanged = ValueNotifier<int>(0);
+
+  /// What Home shows about sync: live / syncing / last success / problems.
+  final ValueNotifier<SyncStatus> syncStatus =
+      ValueNotifier<SyncStatus>(const SyncStatus());
 
   AppServices._(this.db)
       : customers = CustomerRepository(),
         vehicles = VehicleRepository(),
         rentals = RentalRepository(),
         attachments = AttachmentRepository(),
-        search = UniversalSearchService(),
-        engine = LocalSyncEngine();
+        search = UniversalSearchService() {
+    engine = AutoSyncEngine(onLocalChange: _onLocalChange);
+  }
+
+  /// Every local write lands here: the pending count on Home updates at
+  /// once and the change is pushed within a second when a cloud is wired.
+  void _onLocalChange() {
+    pendingChanges().then((n) {
+      syncStatus.value = syncStatus.value.copyWith(pending: n);
+    });
+    cloudSync?.requestSync();
+  }
+
+  Future<int> pendingChanges() => Outbox().pendingCount(db);
+
+  /// Runs a pass now and reports it through [syncStatus]; the same call
+  /// "Sync Now" makes.
+  Future<String> syncNow() => runSync(this);
 
   /// Opens the local database. It starts empty on a new device and is
   /// filled by the first cloud sync (see CloudSyncEngine); nothing is ever

@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import '../app_services.dart';
 import '../sync/cloud_sync_engine.dart';
 import '../sync/sync_actions.dart';
+import '../widgets/sync_status_bar.dart';
 import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
 import '../widgets/rental_tile.dart';
 import 'rental_detail_screen.dart';
 import 'rental_form_screen.dart';
+import 'backup_screen.dart';
 import 'shell_screen.dart';
+import 'sync_conflicts_screen.dart';
 import 'vehicle_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -54,6 +57,12 @@ class _HomeScreenState extends State<HomeScreen> {
       insuranceDue: await services.vehicles.insuranceDue(db, withinDays: 60),
       awaitingFirstDownload:
           services.cloudSync != null && !await CloudSyncEngine.isHydrated(db),
+      conflicts: (await db
+              .rawQuery(
+                'SELECT COUNT(*) AS c FROM sync_conflicts WHERE resolved = 0',
+              )
+              .then((r) => r.first['c'] as int?)) ??
+          0,
       pendingSync: (await db
               .rawQuery(
                 "SELECT COUNT(*) AS c FROM sync_queue WHERE status = 'pending'",
@@ -107,6 +116,20 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirmed == true) await signOut();
   }
 
+  Future<void> _openConflicts() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SyncConflictsScreen()),
+    );
+    _reload();
+  }
+
+  Future<void> _openBackup() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const BackupScreen()),
+    );
+    _reload();
+  }
+
   Future<void> _newRental() async {
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const RentalFormScreen()),
@@ -130,6 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _AccountMenu(
               biometrics: AppScope.of(context).biometrics,
               onSignOut: _signOut,
+              onBackup: _openBackup,
             ),
         ],
       ),
@@ -156,6 +180,14 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
               children: [
+                if (AppScope.of(context).cloudSync != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SyncStatusBar(
+                      status: AppScope.of(context).syncStatus,
+                      onTap: _syncNow,
+                    ),
+                  ),
                 _QuickNav(
                   onSearch: () => _shell(context)?.goToTab(1),
                   onLibrary: () => _shell(context)?.goToTab(2),
@@ -171,19 +203,22 @@ class _HomeScreenState extends State<HomeScreen> {
                             note: note,
                             onTap: note.isSyncPrompt
                                 ? _syncNow
-                                : note.vehicle == null
-                                    ? null
-                                    : () async {
-                                        await Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => VehicleDetailScreen(
-                                              vehicleId:
-                                                  note.vehicle!['id'] as String,
-                                            ),
-                                          ),
-                                        );
-                                        _reload();
-                                      },
+                                : note.isConflictPrompt
+                                    ? _openConflicts
+                                    : note.vehicle == null
+                                        ? null
+                                        : () async {
+                                            await Navigator.of(context).push(
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    VehicleDetailScreen(
+                                                  vehicleId: note.vehicle!['id']
+                                                      as String,
+                                                ),
+                                              ),
+                                            );
+                                            _reload();
+                                          },
                           ),
                       ],
                     ),
@@ -264,8 +299,13 @@ class _HomeScreenState extends State<HomeScreen> {
 class _AccountMenu extends StatefulWidget {
   final BiometricService? biometrics;
   final VoidCallback onSignOut;
+  final VoidCallback onBackup;
 
-  const _AccountMenu({required this.biometrics, required this.onSignOut});
+  const _AccountMenu({
+    required this.biometrics,
+    required this.onSignOut,
+    required this.onBackup,
+  });
 
   @override
   State<_AccountMenu> createState() => _AccountMenuState();
@@ -326,9 +366,18 @@ class _AccountMenuState extends State<_AccountMenu> {
       icon: const Icon(Icons.account_circle_outlined),
       onSelected: (value) {
         if (value == 'biometric') _toggle();
+        if (value == 'backup') widget.onBackup();
         if (value == 'signout') widget.onSignOut();
       },
       itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'backup',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.backup_outlined),
+            title: Text('Backup & restore'),
+          ),
+        ),
         if (_supported)
           PopupMenuItem(
             value: 'biometric',
@@ -464,6 +513,7 @@ class _Note {
   final String subtitle;
   final bool urgent;
   final bool isSyncPrompt;
+  final bool isConflictPrompt;
   final Map<String, Object?>? vehicle;
 
   _Note({
@@ -472,6 +522,7 @@ class _Note {
     required this.subtitle,
     this.urgent = false,
     this.isSyncPrompt = false,
+    this.isConflictPrompt = false,
     this.vehicle,
   });
 
@@ -486,6 +537,7 @@ class _Dashboard {
   final List<Map<String, Object?>> insuranceDue;
   final int pendingSync;
   final bool awaitingFirstDownload;
+  final int conflicts;
 
   _Dashboard({
     required this.unclosed,
@@ -494,6 +546,7 @@ class _Dashboard {
     required this.insuranceDue,
     required this.pendingSync,
     this.awaitingFirstDownload = false,
+    this.conflicts = 0,
   });
 
   /// Only things the data can actually support: insurance dates that are
@@ -524,8 +577,19 @@ class _Dashboard {
         icon: Icons.cloud_upload_outlined,
         title:
             '$pendingSync change${pendingSync == 1 ? '' : 's'} waiting to sync',
-        subtitle: 'Tap Sync Now to send them to the cloud.',
+        subtitle: 'Sent automatically when online. Tap to send now.',
         isSyncPrompt: true,
+      ));
+    }
+
+    if (conflicts > 0) {
+      notes.add(_Note(
+        icon: Icons.merge_type,
+        title: '$conflicts change${conflicts == 1 ? '' : 's'} overridden by '
+            'another device',
+        subtitle: 'Review the values that were replaced.',
+        isConflictPrompt: true,
+        urgent: true,
       ));
     }
 

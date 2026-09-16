@@ -1,7 +1,7 @@
 name: burhan_rent_a_car
 description: Offline-first rental management for Burhan Rent-A-Car.
 publish_to: 'none'
-version: 0.4.2+8
+version: 0.5.0+9
 
 environment:
   sdk: '>=3.6.0 <4.0.0'
@@ -26,6 +26,12 @@ dependencies:
   local_auth: ^2.3.0
   flutter_secure_storage: ^10.3.4
   connectivity_plus: 7.0.0
+  uuid: ^4.5.1
+  path_provider: ^2.1.5
+  file_picker: ^8.1.7
+  cryptography: ^2.7.0
+  web: ^1.1.0
+  archive: ^4.0.0
 
 dev_dependencies:
   flutter_test:

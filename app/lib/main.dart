@@ -15,8 +15,10 @@ import 'auth/secure_session_storage.dart';
 import 'auth/set_new_password_screen.dart';
 import 'auth/sign_in_screen.dart';
 import 'screens/shell_screen.dart';
+import 'backup/cloud_backup.dart';
 import 'sync/cloud_sync_engine.dart';
 import 'sync/sync_actions.dart';
+import 'sync/sync_status.dart';
 import 'supabase_config.dart';
 import 'theme.dart';
 
@@ -64,6 +66,7 @@ class _BurhanAppState extends State<BurhanApp> {
   Future<AppServices>? _servicesFuture;
   StreamSubscription<AuthState>? _authSub;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  CloudSyncEngine? _cloudEngine;
   bool _cloudSyncStarted = false;
 
   /// True once the owner has proven who they are *this launch* -- by typing
@@ -102,6 +105,8 @@ class _BurhanAppState extends State<BurhanApp> {
             _cloudSyncStarted = false;
             _connectivitySub?.cancel();
             _connectivitySub = null;
+            _cloudEngine?.stop();
+            _cloudEngine = null;
           default:
             break;
         }
@@ -113,6 +118,7 @@ class _BurhanAppState extends State<BurhanApp> {
   void dispose() {
     _authSub?.cancel();
     _connectivitySub?.cancel();
+    _cloudEngine?.stop();
     super.dispose();
   }
 
@@ -129,12 +135,46 @@ class _BurhanAppState extends State<BurhanApp> {
       db: services.db,
     );
     services.cloudSync = engine;
+    services.cloudBackup = CloudBackup(
+      client: Supabase.instance.client,
+      db: services.db,
+    );
+    engine.live.addListener(() {
+      services.syncStatus.value =
+          services.syncStatus.value.copyWith(live: engine.live.value);
+    });
+    // Passes started by the engine itself (realtime events, the periodic
+    // safety pass, a save) report through the same status line as a tap.
+    engine.onPass = (summary) =>
+        services.syncStatus.value = services.syncStatus.value.copyWith(
+          phase: summary.hasError ? SyncPhase.error : SyncPhase.idle,
+          lastSuccess: summary.hasError ? null : DateTime.now(),
+          message:
+              summary.error == null ? null : friendlySyncError(summary.error!),
+          clearMessage: !summary.hasError,
+        );
+    engine.onPass = _withDataChanged(services, engine.onPass!);
+    _cloudEngine = engine;
+    engine.start();
     runSync(services);
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
       if (results.any((r) => r != ConnectivityResult.none)) {
         runSync(services);
       }
     });
+  }
+
+  void Function(SyncSummary) _withDataChanged(
+    AppServices services,
+    void Function(SyncSummary) inner,
+  ) {
+    return (summary) {
+      inner(summary);
+      if (summary.changedAnything) services.dataChanged.value++;
+      services.pendingChanges().then((n) => services.syncStatus.value =
+          services.syncStatus.value.copyWith(pending: n));
+      maybeCloudBackup(services);
+    };
   }
 
   /// Only a recovery link changes the flow: it routes to the

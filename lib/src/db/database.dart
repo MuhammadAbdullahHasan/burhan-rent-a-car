@@ -29,6 +29,11 @@ Future<Database> openAppDatabase(
             await db.execute(statement);
           }
         }
+        if (oldVersion < 3) {
+          for (final statement in syncConflictsTableStatements) {
+            await db.execute(statement);
+          }
+        }
       },
     ),
   );

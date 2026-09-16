@@ -1,52 +1,82 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 /// What one sync pass did, for the UI to report.
 class SyncSummary {
   final int pushed;
   final int pulled;
   final int failed;
+  final int conflicts;
   final String? error;
 
   const SyncSummary({
     required this.pushed,
     required this.pulled,
     this.failed = 0,
+    this.conflicts = 0,
     this.error,
   });
 
   bool get hasError => error != null || failed > 0;
-  bool get changedAnything => pushed > 0 || pulled > 0;
+  bool get changedAnything => pushed > 0 || pulled > 0 || conflicts > 0;
 }
 
-const _watermarkKey = 'cloud_last_synced_at';
 const _hydratedKey = 'cloud_hydrated';
+const _watermarkPrefix = 'cloud_wm_';
 const _epoch = '1970-01-01T00:00:00.000Z';
+const _pageSize = 500;
+const _batchSize = 200;
+const _attachmentBatchSize = 20;
 
-/// Pushes queued local changes to Postgres, then pulls anything changed
-/// remotely since this device's last successful sync -- the actual network
-/// half of the outbox/sync_queue design the local data layer already has.
+/// Re-read this much before the last watermark on every pull. Rows are
+/// stamped with the server clock at write time, and a write that commits a
+/// moment after a later-stamped one could otherwise slip between two pulls.
+/// Applying a row twice is harmless (idempotent by id).
+const _overlap = Duration(seconds: 10);
+
+const _uuid = Uuid();
+
+/// The only thing in the app that talks to Postgres.
 ///
-/// Every read/write the rest of the app does still goes to local SQLite
-/// (offline-first, unchanged); this engine is the only thing that talks to
-/// Supabase, and it only ever updates local rows to match. Push always runs
-/// before pull in the same pass, so a pull can never clobber a change this
-/// device hasn't sent yet -- and as a second guard, pull skips any row
-/// still sitting in the outbox as pending.
+/// Every read/write the rest of the app does goes to local SQLite
+/// (offline-first); this engine pushes the outbox up and pulls remote
+/// changes down, keeping local rows equal to the server's.
 ///
-/// The cloud is the single source of the dataset: a device starts empty and
-/// is filled by its first pull ("hydration"). Devices from before that rule
-/// existed hold their own private copy of the test dataset instead; the
-/// first sync on such a device replaces that copy with the cloud's and
-/// re-sends whatever the owner created or edited on it -- see [_hydrate].
+/// * Push before pull in one pass, so a pull can never clobber a change
+///   this device hasn't sent; pull also skips rows still pending.
+/// * Pull is paged and driven by the SERVER's change clock (`synced_at`),
+///   never a device clock, so nothing is missed on a phone with a wrong
+///   time and a 10,000-row dataset arrives complete.
+/// * Realtime: the server announces every change; [start] subscribes and
+///   a pull follows within a second. A periodic pass and the connectivity
+///   listener in main.dart are the safety net.
+/// * Edits carry a version. An edit that reaches the server after a newer
+///   edit of the same record from another device is NOT applied over it:
+///   the server's row wins locally and the overridden values are kept in
+///   `sync_conflicts` for the owner to see. Nothing is lost silently.
+/// * A device starts empty and is filled by its first pull ("hydration").
+///   Devices from before that rule held their own private copy of the test
+///   dataset; their first sync replaces it with the cloud's -- [_hydrate].
 class CloudSyncEngine {
   final SupabaseClient client;
   final Database db;
   final Outbox _outbox = Outbox();
+
+  /// True while the realtime channel is connected.
+  final ValueNotifier<bool> live = ValueNotifier<bool>(false);
+
   Future<SyncSummary>? _inFlight;
+  bool _runAgain = false;
+  RealtimeChannel? _channel;
+  Timer? _periodic;
+  Timer? _debounce;
+  void Function(SyncSummary summary)? onPass;
 
   CloudSyncEngine({required this.client, required this.db});
 
@@ -61,11 +91,80 @@ class CloudSyncEngine {
     return rows.isNotEmpty;
   }
 
-  /// Overlapping calls (launch, connectivity, a "Sync Now" tap) share one
-  /// pass: two passes at once could ask the server for a rental number
-  /// twice for the same rental.
+  // ---- lifecycle -----------------------------------------------------------
+
+  /// Subscribes to server change notifications and starts the periodic
+  /// safety pass. Idempotent.
+  void start() {
+    if (_channel != null) return;
+    var channel = client.channel('sync-${_uuid.v4()}');
+    for (final table in const [
+      'customers',
+      'vehicles',
+      'rentals',
+      'attachments'
+    ]) {
+      channel = channel.onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: table,
+        callback: (_) => requestSync(),
+      );
+    }
+    _channel = channel
+      ..subscribe((status, error) {
+        final connected = status == RealtimeSubscribeStatus.subscribed;
+        live.value = connected;
+        // Anything that happened while disconnected is picked up now.
+        if (connected) requestSync();
+      });
+    _periodic = Timer.periodic(const Duration(seconds: 60), (_) => syncNow());
+  }
+
+  Future<void> stop() async {
+    _periodic?.cancel();
+    _periodic = null;
+    _debounce?.cancel();
+    _debounce = null;
+    final channel = _channel;
+    _channel = null;
+    live.value = false;
+    if (channel != null) await client.removeChannel(channel);
+  }
+
+  /// Coalesces bursts (a realtime event per row, a save followed by a photo)
+  /// into one pass shortly after the last request.
+  void requestSync() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), syncNow);
+  }
+
+  /// Overlapping calls share one pass; a request that arrives mid-pass
+  /// triggers exactly one more pass afterwards, so nothing announced during
+  /// a pass is missed. (Two passes at once could also ask the server for a
+  /// rental number twice for the same rental.)
   Future<SyncSummary> syncNow() {
-    return _inFlight ??= _run().whenComplete(() => _inFlight = null);
+    final running = _inFlight;
+    if (running != null) {
+      _runAgain = true;
+      return running;
+    }
+    final pass = _run().whenComplete(() {
+      _inFlight = null;
+      if (_runAgain) {
+        _runAgain = false;
+        syncNow();
+      }
+    });
+    _inFlight = pass;
+    return pass;
+  }
+
+  /// Completes once no pass is running (tests, and shutdown).
+  Future<void> settle() async {
+    while (_inFlight != null) {
+      await _inFlight;
+    }
   }
 
   Future<SyncSummary> _run() async {
@@ -79,11 +178,13 @@ class CloudSyncEngine {
 
     var pushed = 0;
     var failed = 0;
+    var conflicts = 0;
     String? error;
     try {
       final result = await _push();
       pushed = result.pushed;
       failed = result.failed;
+      conflicts = result.conflicts;
       error = result.firstError;
     } catch (e) {
       error = e.toString();
@@ -94,96 +195,183 @@ class CloudSyncEngine {
     } catch (e) {
       error ??= e.toString();
     }
-    return SyncSummary(
+    final summary = SyncSummary(
       pushed: pushed,
       pulled: pulled,
       failed: failed,
+      conflicts: conflicts,
       error: error,
     );
+    onPass?.call(summary);
+    return summary;
   }
 
   // ---- push ------------------------------------------------------------
 
-  Future<({int pushed, int failed, String? firstError})> _push() async {
+  Future<_PushResult> _push() async {
     var pushed = 0;
     var failed = 0;
+    var conflicts = 0;
     String? firstError;
-    for (final item in await _outbox.pending(db)) {
-      final id = item['id'] as String;
+
+    // Parents before children, otherwise in the order things happened:
+    // every customer/vehicle a rental needs was created before it, and an
+    // entity's own create precedes its edits, so a stable sort by kind
+    // keeps every dependency while letting creates of one kind batch.
+    final items = List.of(await _outbox.pending(db))
+      ..sort((a, b) => _order(a['entity_type'] as String)
+          .compareTo(_order(b['entity_type'] as String)));
+    var i = 0;
+    while (i < items.length) {
+      final item = items[i];
       final entityType = item['entity_type'] as String;
-      final entityId = item['entity_id'] as String;
-      try {
-        switch (entityType) {
-          case 'customer':
-            await _pushSimple('customers', entityId, _customerToRemote);
-          case 'vehicle':
-            await _pushSimple('vehicles', entityId, _vehicleToRemote);
-          case 'rental':
-            await _pushRental(entityId);
-          case 'attachment':
-            await _pushAttachment(entityId);
-          default:
-            // Unknown entity type from a future version; nothing to do,
-            // but don't leave it stuck retrying forever.
+      final operation = item['operation'] as String;
+
+      // Consecutive creates/restores of one kind go up in one request.
+      if (operation == 'insert' || operation == 'restore') {
+        final batch = <Map<String, Object?>>[item];
+        final limit =
+            entityType == 'attachment' ? _attachmentBatchSize : _batchSize;
+        while (i + batch.length < items.length && batch.length < limit) {
+          final next = items[i + batch.length];
+          if (next['entity_type'] != entityType ||
+              next['operation'] != operation) {
             break;
+          }
+          batch.add(next);
         }
+        i += batch.length;
+        try {
+          await _pushBatch(entityType, operation, batch);
+          for (final b in batch) {
+            await _outbox.markDone(db, b['id'] as String);
+          }
+          pushed += batch.length;
+        } catch (e) {
+          failed += batch.length;
+          firstError ??= e.toString();
+          for (final b in batch) {
+            await _outbox.markFailed(db, b['id'] as String, e.toString());
+          }
+        }
+        continue;
+      }
+
+      i++;
+      final id = item['id'] as String;
+      try {
+        final conflicted =
+            await _pushEdit(entityType, item['entity_id'] as String);
         await _outbox.markDone(db, id);
-        pushed++;
+        if (conflicted) {
+          conflicts++;
+        } else {
+          pushed++;
+        }
       } catch (e) {
         failed++;
         firstError ??= e.toString();
         await _outbox.markFailed(db, id, e.toString());
       }
     }
-    return (pushed: pushed, failed: failed, firstError: firstError);
+    return _PushResult(pushed, failed, conflicts, firstError);
   }
 
-  Future<void> _pushSimple(
-    String table,
-    String id,
-    Map<String, Object?> Function(Map<String, Object?>) toRemote,
+  /// Creates (and restore fills) go up as upserts. `restore` never
+  /// overwrites a row the server already has -- the cloud stays the truth
+  /// and a backup only fills what is missing.
+  Future<void> _pushBatch(
+    String entityType,
+    String operation,
+    List<Map<String, Object?>> batch,
   ) async {
-    final rows = await db.query(table, where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return; // locally deleted before it ever synced
-    await client.from(table).upsert(toRemote(rows.first));
-  }
+    final table = _tableOf(entityType);
+    final ids = batch.map((b) => b['entity_id'] as String).toList();
+    final rows = await _rowsByIds(table, ids);
+    if (rows.isEmpty) return; // deleted locally before ever syncing
+    final ignoreExisting = operation == 'restore';
 
-  /// The one entity with server-owned state: a rental created offline has
-  /// no permanent number yet. Ask Postgres for one (atomic, via
-  /// allocate_rental_no()) before pushing, exactly once -- if this item is
-  /// retried after a partial failure, rental_no is already set locally, so
-  /// it's never asked for twice.
-  Future<void> _pushRental(String id) async {
-    final rows = await db.query('rentals', where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return;
-    var row = rows.first;
-
-    await _ensureRemote(
-      'customers',
-      row['customer_id'] as String?,
-      _customerToRemote,
-    );
-    await _ensureRemote(
-      'vehicles',
-      row['vehicle_id'] as String?,
-      _vehicleToRemote,
-    );
-
-    if (row['rental_no'] == null) {
-      row = {...row, 'rental_no': await _allocateNumber(id)};
+    if (entityType == 'rental') {
+      // Numbers first (one atomic server call each), then one upsert.
+      final numbered = <Map<String, Object?>>[];
+      for (final row in rows) {
+        numbered.add(row['rental_no'] == null
+            ? {...row, 'rental_no': await _allocateNumber(row['id'] as String)}
+            : row);
+      }
+      try {
+        await _upsertRentals(numbered, ignoreExisting);
+      } on PostgrestException catch (e) {
+        if (e.code != '23503') rethrow; // a parent is missing on the server
+        await _ensureParents(numbered);
+        await _upsertRentals(numbered, ignoreExisting);
+      }
+      return;
     }
 
+    final remote = rows.map((r) => _toRemote(table, r)).toList();
+    await client.from(table).upsert(remote, ignoreDuplicates: ignoreExisting);
+  }
+
+  Future<void> _upsertRentals(
+    List<Map<String, Object?>> rows,
+    bool ignoreExisting,
+  ) async {
+    try {
+      await client.from('rentals').upsert(
+            rows.map(_rentalToRemote).toList(),
+            ignoreDuplicates: ignoreExisting,
+          );
+    } on PostgrestException catch (e) {
+      // A number this device held without the server ever storing it has
+      // since been taken. It was never confirmed; the server issues the
+      // real one now -- one rental at a time so the rest are unaffected.
+      final numberTaken = e.code == '23505' && e.message.contains('rental_no');
+      if (!numberTaken || ignoreExisting) rethrow;
+      for (final row in rows) {
+        await _pushRentalRenumbering(row);
+      }
+    }
+  }
+
+  Future<void> _pushRentalRenumbering(Map<String, Object?> row) async {
     try {
       await client.from('rentals').upsert(_rentalToRemote(row));
     } on PostgrestException catch (e) {
-      // A number this device held without the server ever storing it
-      // (assigned by the pre-cloud local stand-in, or allocated but then
-      // refused for another reason) has since been taken. It was never a
-      // confirmed number, so the server issues the real one now.
       final numberTaken = e.code == '23505' && e.message.contains('rental_no');
-      if (!numberTaken || !await _createdLocally('rental', id)) rethrow;
-      row = {...row, 'rental_no': await _allocateNumber(id)};
-      await client.from('rentals').upsert(_rentalToRemote(row));
+      if (!numberTaken ||
+          !await _createdLocally('rental', row['id'] as String)) {
+        rethrow;
+      }
+      final fresh = {
+        ...row,
+        'rental_no': await _allocateNumber(row['id'] as String),
+      };
+      await client.from('rentals').upsert(_rentalToRemote(fresh));
+    }
+  }
+
+  /// A rental's customer/vehicle must exist on the server before the
+  /// rental can (foreign keys). Outbox order normally guarantees that; this
+  /// covers a parent that exists only locally for any other reason.
+  /// Insert-if-missing only -- never overwrites a server copy.
+  Future<void> _ensureParents(List<Map<String, Object?>> rentals) async {
+    for (final (column, table) in const [
+      ('customer_id', 'customers'),
+      ('vehicle_id', 'vehicles'),
+    ]) {
+      final ids = rentals
+          .map((r) => r[column] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList();
+      if (ids.isEmpty) continue;
+      final rows = await _rowsByIds(table, ids);
+      if (rows.isEmpty) continue;
+      await client.from(table).upsert(
+            rows.map((r) => _toRemote(table, r)).toList(),
+            ignoreDuplicates: true,
+          );
     }
   }
 
@@ -199,100 +387,128 @@ class CloudSyncEngine {
     return rentalNo;
   }
 
-  /// A rental's customer/vehicle must exist on the server before the
-  /// rental can (foreign keys). Normally the outbox order guarantees that;
-  /// this covers a parent that exists only locally for any other reason.
-  /// Insert-if-missing only -- never overwrite a server copy that might be
-  /// newer than ours.
-  Future<void> _ensureRemote(
-    String table,
-    String? id,
-    Map<String, Object?> Function(Map<String, Object?>) toRemote,
-  ) async {
-    if (id == null) return;
-    final rows = await db.query(table, where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return;
-    await client
-        .from(table)
-        .upsert(toRemote(rows.first), ignoreDuplicates: true);
-  }
+  /// An edit (update / soft delete) is applied only if the server's copy is
+  /// older than the version this edit was made on. Returns true when it
+  /// lost to a newer edit from another device -- the server's row is then
+  /// taken locally and the overridden values recorded.
+  Future<bool> _pushEdit(String entityType, String entityId) async {
+    final table = _tableOf(entityType);
+    final rows = await db.query(table, where: 'id = ?', whereArgs: [entityId]);
+    if (rows.isEmpty) return false;
+    final local = rows.first;
+    final version = local['version'] as int;
 
-  Future<void> _pushAttachment(String id) async {
-    final rows =
-        await db.query('attachments', where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return;
-    final row = rows.first;
-    final thumb = row['thumbnail'] as Uint8List?;
-    await client.from('attachments').upsert({
-      'id': row['id'],
-      'entity_type': row['entity_type'],
-      'entity_id': row['entity_id'],
-      'kind': row['kind'],
-      'mime_type': row['mime_type'],
-      'image_base64': base64Encode(row['image'] as Uint8List),
-      'thumbnail_base64': thumb == null ? null : base64Encode(thumb),
-      'is_deleted': _asBool(row['is_deleted']),
-      'version': row['version'],
-      'created_at': row['created_at'],
-      'updated_at': row['updated_at'],
+    if (entityType == 'rental' && local['rental_no'] == null) {
+      // Edited before it was ever sent: the pending create carries the
+      // edit, and there is no server row to race against yet.
+      return false;
+    }
+
+    final remote = _toRemote(table, local);
+    final updated = await client
+        .from(table)
+        .update(remote)
+        .eq('id', entityId)
+        .lt('version', version)
+        .select('id');
+    if (updated.isNotEmpty) return false;
+
+    final server =
+        await client.from(table).select().eq('id', entityId).maybeSingle();
+    if (server == null) {
+      // Never reached the server (created on an old build); create it now.
+      if (entityType == 'rental') await _ensureParents([local]);
+      await client.from(table).upsert(remote);
+      return false;
+    }
+    if (server['version'] == version &&
+        server['updated_at'] == local['updated_at']) {
+      return false; // this exact edit is already there
+    }
+
+    await db.insert('sync_conflicts', {
+      'id': _uuid.v4(),
+      'entity_type': entityType,
+      'entity_id': entityId,
+      'local_row': jsonEncode(_jsonSafe(local)),
+      'server_row': jsonEncode(server),
+      'resolved': 0,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
     });
+    await _apply(table, server);
+    return true;
   }
 
   // ---- pull --------------------------------------------------------------
 
   Future<int> _pull() async {
-    final since = await _watermark();
-    final startedAt = DateTime.now().toUtc().toIso8601String();
-    final pulled = await _pullAll(since);
-    await _setWatermark(startedAt);
+    final pulled = await _pullAll();
     return pulled.values.fold<int>(0, (sum, ids) => sum + ids.length);
   }
 
-  /// Pulls every table; returns the ids applied per table.
-  Future<Map<String, Set<String>>> _pullAll(String since) async {
+  /// Pulls every table from its own watermark; returns the ids applied.
+  Future<Map<String, Set<String>>> _pullAll() async {
     return {
-      'customers': await _pullTable(
-        'customers',
-        since,
-        await _pendingIdsFor('customer'),
-        _applyCustomer,
-      ),
-      'vehicles': await _pullTable(
-        'vehicles',
-        since,
-        await _pendingIdsFor('vehicle'),
-        _applyVehicle,
-      ),
-      'rentals': await _pullTable(
-        'rentals',
-        since,
-        await _pendingIdsFor('rental'),
-        _applyRental,
-      ),
-      'attachments': await _pullTable(
-        'attachments',
-        since,
-        await _pendingIdsFor('attachment'),
-        _applyAttachment,
-      ),
+      for (final table in _syncedTables)
+        table: await _pullTable(table, await _pendingIdsFor(_typeOf(table))),
     };
   }
 
-  Future<Set<String>> _pullTable(
-    String table,
-    String since,
-    Set<String> skipIds,
-    Future<void> Function(Map<String, Object?>) apply,
-  ) async {
-    final rows = await client.from(table).select().gt('updated_at', since);
+  Future<Set<String>> _pullTable(String table, Set<String> skipIds) async {
+    final watermark = await _watermark(table);
+    final since = watermark == _epoch
+        ? _epoch
+        : DateTime.parse(watermark)
+            .toUtc()
+            .subtract(_overlap)
+            .toIso8601String();
+
     final applied = <String>{};
-    for (final row in rows) {
-      final id = row['id'] as String;
-      if (skipIds.contains(id)) continue; // has an unpushed local change
-      await apply(row);
-      applied.add(id);
+    var newest = watermark;
+    var offset = 0;
+    while (true) {
+      final rows = await client
+          .from(table)
+          .select()
+          .gt('synced_at', since)
+          .order('synced_at', ascending: true)
+          .order('id', ascending: true)
+          .range(offset, offset + _pageSize - 1);
+      for (final row in rows) {
+        final id = row['id'] as String;
+        final stamp = row['synced_at'] as String;
+        if (_isLater(stamp, newest)) newest = stamp;
+        if (skipIds.contains(id)) continue; // has an unpushed local change
+        if (await _alreadyLocal(table, row)) continue; // overlap re-read
+        await _apply(table, row);
+        applied.add(id);
+      }
+      if (rows.length < _pageSize) break;
+      offset += rows.length;
     }
+    if (newest != watermark) await _setWatermark(table, newest);
     return applied;
+  }
+
+  /// The overlap window re-reads rows this device already holds; an
+  /// identical copy is neither re-written nor reported as a change.
+  Future<bool> _alreadyLocal(String table, Map<String, dynamic> row) async {
+    final local = await db.query(
+      table,
+      columns: ['version', 'updated_at', if (table == 'rentals') 'rental_no'],
+      where: 'id = ?',
+      whereArgs: [row['id']],
+    );
+    if (local.isEmpty) return false;
+    final l = local.first;
+    return l['version'] == row['version'] &&
+        l['updated_at'] == row['updated_at'] &&
+        (table != 'rentals' || l['rental_no'] == row['rental_no']);
+  }
+
+  bool _isLater(String a, String b) {
+    if (b == _epoch) return true;
+    return DateTime.parse(a).isAfter(DateTime.parse(b));
   }
 
   Future<Set<String>> _pendingIdsFor(String entityType) async {
@@ -304,6 +520,14 @@ class CloudSyncEngine {
     );
     return rows.map((r) => r['entity_id'] as String).toSet();
   }
+
+  Future<void> _apply(String table, Map<String, dynamic> row) =>
+      switch (table) {
+        'customers' => _applyCustomer(row),
+        'vehicles' => _applyVehicle(row),
+        'rentals' => _applyRental(row),
+        _ => _applyAttachment(row),
+      };
 
   Future<void> _applyCustomer(Map<String, Object?> r) => db.insert(
         'customers',
@@ -461,7 +685,8 @@ class CloudSyncEngine {
       where: "status = 'pending'",
     );
 
-    final pulled = await _pullAll(_epoch);
+    await _resetWatermarks();
+    final pulled = await _pullAll();
     final twin = {for (final table in _tables) table: <String, String>{}};
     final keep = {
       for (final table in _tables) table: {...created[_typeOf(table)]!},
@@ -593,7 +818,6 @@ class CloudSyncEngine {
       );
     }
 
-    await _setWatermark(startedAt);
     await db.insert(
       'app_meta',
       {'key': _hydratedKey, 'value': startedAt},
@@ -710,20 +934,92 @@ class CloudSyncEngine {
 
   // ---- watermark -----------------------------------------------------------
 
-  Future<String> _watermark() async {
+  // ---- watermarks ------------------------------------------------------------
+
+  static const _syncedTables = [
+    'customers',
+    'vehicles',
+    'rentals',
+    'attachments'
+  ];
+
+  Future<String> _watermark(String table) async {
     final rows = await db.query(
       'app_meta',
       where: 'key = ?',
-      whereArgs: [_watermarkKey],
+      whereArgs: ['$_watermarkPrefix$table'],
     );
     return rows.isEmpty ? _epoch : rows.first['value'] as String;
   }
 
-  Future<void> _setWatermark(String iso) => db.insert(
+  Future<void> _setWatermark(String table, String iso) => db.insert(
         'app_meta',
-        {'key': _watermarkKey, 'value': iso},
+        {'key': '$_watermarkPrefix$table', 'value': iso},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
+
+  /// Forces the next pull to re-read everything (after a restore, or on
+  /// hydration). Applying is idempotent, so this is always safe.
+  Future<void> _resetWatermarks() async {
+    await db.delete(
+      'app_meta',
+      where: 'key LIKE ?',
+      whereArgs: ['$_watermarkPrefix%'],
+    );
+  }
+
+  /// Public form of [_resetWatermarks] for the restore flow.
+  Future<void> forceFullPull() => _resetWatermarks();
+
+  // ---- helpers ---------------------------------------------------------------
+
+  int _order(String entityType) => switch (entityType) {
+        'customer' => 0,
+        'vehicle' => 1,
+        'rental' => 2,
+        _ => 3,
+      };
+
+  String _tableOf(String entityType) => switch (entityType) {
+        'customer' => 'customers',
+        'vehicle' => 'vehicles',
+        'rental' => 'rentals',
+        _ => 'attachments',
+      };
+
+  Future<List<Map<String, Object?>>> _rowsByIds(
+    String table,
+    List<String> ids,
+  ) async {
+    if (ids.isEmpty) return const [];
+    final rows = await db.query(
+      table,
+      where: 'id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: ids,
+    );
+    // Keep outbox order.
+    final byId = {for (final r in rows) r['id'] as String: r};
+    return [
+      for (final id in ids)
+        if (byId[id] != null) byId[id]!
+    ];
+  }
+
+  Map<String, Object?> _toRemote(String table, Map<String, Object?> r) =>
+      switch (table) {
+        'customers' => _customerToRemote(r),
+        'vehicles' => _vehicleToRemote(r),
+        'rentals' => _rentalToRemote(r),
+        _ => _attachmentToRemote(r),
+      };
+
+  /// Bytes can't go into the conflict log as-is.
+  Map<String, Object?> _jsonSafe(Map<String, Object?> r) => {
+        for (final e in r.entries)
+          e.key: e.value is Uint8List
+              ? '<${(e.value as Uint8List).length} bytes>'
+              : e.value,
+      };
 
   // ---- row shape: local -> remote -------------------------------------------
 
@@ -785,6 +1081,31 @@ class CloudSyncEngine {
         'created_at': r['created_at'],
         'updated_at': r['updated_at'],
       };
+
+  Map<String, Object?> _attachmentToRemote(Map<String, Object?> r) {
+    final thumb = r['thumbnail'] as Uint8List?;
+    return {
+      'id': r['id'],
+      'entity_type': r['entity_type'],
+      'entity_id': r['entity_id'],
+      'kind': r['kind'],
+      'mime_type': r['mime_type'],
+      'image_base64': base64Encode(r['image'] as Uint8List),
+      'thumbnail_base64': thumb == null ? null : base64Encode(thumb),
+      'is_deleted': _asBool(r['is_deleted']),
+      'version': r['version'],
+      'created_at': r['created_at'],
+      'updated_at': r['updated_at'],
+    };
+  }
+}
+
+class _PushResult {
+  final int pushed;
+  final int failed;
+  final int conflicts;
+  final String? firstError;
+  _PushResult(this.pushed, this.failed, this.conflicts, this.firstError);
 }
 
 bool _asBool(Object? sqliteInt) => sqliteInt == 1;

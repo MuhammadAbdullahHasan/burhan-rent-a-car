@@ -9,7 +9,7 @@
 /// touches the import mapper, not this schema.
 library;
 
-const schemaVersion = 2;
+const schemaVersion = 3;
 
 const List<String> createTableStatements = [
   '''
@@ -111,6 +111,7 @@ const List<String> createTableStatements = [
   ''',
   'CREATE INDEX idx_sync_queue_status ON sync_queue(status)',
   ...attachmentsTableStatements,
+  ...syncConflictsTableStatements,
 ];
 
 /// Photos attached to a record -- today the handwritten rental agreement.
@@ -139,4 +140,24 @@ const List<String> attachmentsTableStatements = [
   )
   ''',
   'CREATE INDEX idx_attachments_entity ON attachments(entity_type, entity_id, kind)',
+];
+
+/// A local edit that lost to a newer edit of the same record from another
+/// device. The server's version is kept; the overridden values are stored
+/// here so the owner can see (and re-apply) them. Nothing is lost silently.
+///
+/// Schema version 3. Also applied by `onUpgrade` for older databases.
+const List<String> syncConflictsTableStatements = [
+  '''
+  CREATE TABLE sync_conflicts (
+    id           TEXT PRIMARY KEY,
+    entity_type  TEXT NOT NULL,
+    entity_id    TEXT NOT NULL,
+    local_row    TEXT NOT NULL,
+    server_row   TEXT NOT NULL,
+    resolved     INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL
+  )
+  ''',
+  'CREATE INDEX idx_sync_conflicts_open ON sync_conflicts(resolved)',
 ];

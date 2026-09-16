@@ -185,3 +185,72 @@ create policy "owner deletes own attachments" on attachments for delete using (o
 create index idx_customers_updated on customers(owner_id, updated_at);
 create index idx_vehicles_updated on vehicles(owner_id, updated_at);
 create index idx_rentals_updated on rentals(owner_id, updated_at);
+
+-- ---------------------------------------------------------------------------
+-- Sync v2: server-stamped change clock, realtime, audit trigger, backups.
+-- ---------------------------------------------------------------------------
+
+-- Devices pull "everything changed since I last looked" against synced_at,
+-- which the database stamps itself -- never against a device clock.
+alter table customers   add column synced_at timestamptz not null default now();
+alter table vehicles    add column synced_at timestamptz not null default now();
+alter table rentals     add column synced_at timestamptz not null default now();
+alter table attachments add column synced_at timestamptz not null default now();
+
+create function touch_synced_at() returns trigger language plpgsql as $$
+begin
+  new.synced_at := now();
+  return new;
+end;
+$$;
+create trigger customers_touch_synced   before insert or update on customers   for each row execute function touch_synced_at();
+create trigger vehicles_touch_synced    before insert or update on vehicles    for each row execute function touch_synced_at();
+create trigger rentals_touch_synced     before insert or update on rentals     for each row execute function touch_synced_at();
+create trigger attachments_touch_synced before insert or update on attachments for each row execute function touch_synced_at();
+
+create index idx_customers_synced   on customers(owner_id, synced_at, id);
+create index idx_vehicles_synced    on vehicles(owner_id, synced_at, id);
+create index idx_rentals_synced     on rentals(owner_id, synced_at, id);
+create index idx_attachments_synced on attachments(owner_id, synced_at, id);
+
+-- Realtime: every change is announced to subscribed devices (RLS still
+-- decides who may see a row).
+alter publication supabase_realtime add table customers, vehicles, rentals, attachments;
+
+-- Audit trail written by the database itself, so no client can skip it.
+create function log_audit() returns trigger
+  language plpgsql security definer set search_path = public as $$
+declare
+  changed jsonb; key text; old_j jsonb; new_j jsonb;
+begin
+  new_j := to_jsonb(new) - 'image_base64' - 'thumbnail_base64' - 'synced_at';
+  if tg_op = 'INSERT' then
+    changed := new_j;
+  else
+    old_j := to_jsonb(old) - 'image_base64' - 'thumbnail_base64' - 'synced_at';
+    changed := '{}'::jsonb;
+    for key in select jsonb_object_keys(new_j) loop
+      if new_j -> key is distinct from old_j -> key then
+        changed := changed || jsonb_build_object(key, jsonb_build_object('from', old_j -> key, 'to', new_j -> key));
+      end if;
+    end loop;
+    if changed = '{}'::jsonb then return new; end if;
+  end if;
+  insert into audit_log (owner_id, entity_type, entity_id, action, changed_fields, actor)
+  values (new.owner_id, tg_table_name, new.id, lower(tg_op), changed, auth.uid());
+  return new;
+end;
+$$;
+create trigger customers_audit   after insert or update on customers   for each row execute function log_audit();
+create trigger vehicles_audit    after insert or update on vehicles    for each row execute function log_audit();
+create trigger rentals_audit     after insert or update on rentals     for each row execute function log_audit();
+create trigger attachments_audit after insert or update on attachments for each row execute function log_audit();
+
+-- Private bucket for the daily cloud snapshots; each owner sees only the
+-- folder named after their own user id.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('backups', 'backups', false, 209715200);
+create policy "owner manages own backups" on storage.objects
+  for all to authenticated
+  using (bucket_id = 'backups' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'backups' and (storage.foldername(name))[1] = auth.uid()::text);

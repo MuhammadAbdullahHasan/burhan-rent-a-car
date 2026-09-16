@@ -21,12 +21,16 @@ class Snapshot {
   });
 }
 
-Future<Snapshot> exportSnapshot(DatabaseExecutor db) async {
+Future<Snapshot> exportSnapshot(
+  DatabaseExecutor db, {
+  bool includeAttachments = true,
+}) async {
   return Snapshot(
     customers: await db.query('customers'),
     vehicles: await db.query('vehicles'),
     rentals: await db.query('rentals'),
-    attachments: await db.query('attachments'),
+    attachments:
+        includeAttachments ? await db.query('attachments') : const [],
   );
 }
 

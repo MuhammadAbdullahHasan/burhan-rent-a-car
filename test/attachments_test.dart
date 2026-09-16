@@ -149,7 +149,10 @@ void main() {
           version: 1,
           onCreate: (db, _) async {
             for (final statement in createTableStatements) {
-              if (attachmentsTableStatements.contains(statement)) continue;
+              if (attachmentsTableStatements.contains(statement) ||
+                  syncConflictsTableStatements.contains(statement)) {
+                continue;
+              }
               await db.execute(statement);
             }
           },
@@ -165,6 +168,7 @@ void main() {
       expect(await upgraded.getVersion(), schemaVersion);
       expect((await upgraded.query('rentals')).length, beforeRentals);
       expect(await upgraded.query('attachments'), isEmpty); // exists, empty
+      expect(await upgraded.query('sync_conflicts'), isEmpty); // v3, empty
 
       // And it is fully usable.
       final id = (await rentals.findByRentalNo(upgraded, 5))!['id'] as String;

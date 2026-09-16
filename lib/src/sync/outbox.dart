@@ -31,6 +31,37 @@ class Outbox {
     return id;
   }
 
+  /// Queues many rows of one type at once (restore, migration).
+  Future<void> enqueueAll(
+    DatabaseExecutor db, {
+    required String entityType,
+    required Iterable<String> entityIds,
+    required String operation,
+  }) async {
+    final batch = db.batch();
+    final now = DateTime.now().toUtc().toIso8601String();
+    for (final entityId in entityIds) {
+      batch.insert('sync_queue', {
+        'id': _uuid.v4(),
+        'entity_type': entityType,
+        'entity_id': entityId,
+        'operation': operation,
+        'payload': null,
+        'status': 'pending',
+        'retry_count': 0,
+        'created_at': now,
+      });
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<int> pendingCount(DatabaseExecutor db) async {
+    final rows = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM sync_queue WHERE status = 'pending'",
+    );
+    return rows.first['c'] as int;
+  }
+
   Future<List<Map<String, Object?>>> pending(DatabaseExecutor db) {
     return db.query(
       'sync_queue',
