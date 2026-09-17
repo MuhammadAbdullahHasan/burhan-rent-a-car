@@ -20,6 +20,21 @@ class CustomerRepository {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// Every (non-deleted) customer on a phone number, oldest first. Family
+  /// members routinely share one number, so a phone alone can map to more
+  /// than one person -- see ImportPipeline's name check.
+  Future<List<Map<String, Object?>>> findAllByPhoneNormalized(
+    DatabaseExecutor db,
+    String phoneNormalized,
+  ) {
+    return db.query(
+      'customers',
+      where: 'phone_normalized = ? AND is_deleted = 0',
+      whereArgs: [phoneNormalized],
+      orderBy: 'created_at ASC',
+    );
+  }
+
   /// The conservative repeat-customer match: normalized phone first, then
   /// CNIC, never name. Null when neither is given or nothing matches.
   Future<Map<String, Object?>?> findByPhoneOrCnic(

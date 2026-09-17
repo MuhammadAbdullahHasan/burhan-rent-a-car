@@ -1,0 +1,4 @@
+# One test file at a time: sqflite_common_ffi shares one native SQLite
+# connection tracker per process, and concurrent test isolates trip it up
+# ("bad parameter or other API misuse" on ROLLBACK). The suite takes ~5 s.
+concurrency: 1

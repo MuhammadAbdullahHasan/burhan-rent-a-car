@@ -61,3 +61,52 @@ String? normalizeIsoDate(String? raw) {
   if (value == null) return null;
   return _isoDate.hasMatch(value) ? value : null;
 }
+
+const _honorifics = {
+  'mr', 'mrs', 'ms', 'dr', 'syed', 'syeda', 'sayed', 'haji', 'hafiz',
+  'muhammad', 'mohammad', 'mohammed', 'mohd', 'md', 'sheikh', 'shaikh',
+  'malik', 'mian', 'chaudhry', 'ch', 'khawaja', 'engr', 'prof',
+};
+
+/// Whether two customer names plausibly belong to the same person: the
+/// first "real" name token (honorifics such as Syed/Muhammad/Haji dropped)
+/// is the same or within a couple of letters -- enough to absorb the
+/// Naseer/Nasir, Tarique/Tariq spelling drift in hand-typed history, while
+/// keeping Danish and Shahzad apart. A missing name on either side is
+/// treated as compatible (nothing to contradict).
+bool sameCustomerName(String? a, String? b) {
+  final ta = _nameTokens(a);
+  final tb = _nameTokens(b);
+  if (ta.isEmpty || tb.isEmpty) return true;
+  if (ta.first == tb.first) return true;
+  if (ta.contains(tb.first) || tb.contains(ta.first)) return true;
+  return _editDistance(ta.first, tb.first) <= 2 &&
+      ta.first.length >= 4 &&
+      tb.first.length >= 4;
+}
+
+List<String> _nameTokens(String? name) {
+  final value = normalizeNullable(name);
+  if (value == null) return const [];
+  final tokens = value
+      .toLowerCase()
+      .split(RegExp(r'[^a-z]+'))
+      .where((t) => t.isNotEmpty)
+      .toList();
+  final real = tokens.where((t) => !_honorifics.contains(t)).toList();
+  return real.isEmpty ? tokens : real;
+}
+
+int _editDistance(String a, String b) {
+  var prev = List<int>.generate(b.length + 1, (i) => i);
+  for (var i = 1; i <= a.length; i++) {
+    final cur = List<int>.filled(b.length + 1, 0)..[0] = i;
+    for (var j = 1; j <= b.length; j++) {
+      final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+      cur[j] = [cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost]
+          .reduce((x, y) => x < y ? x : y);
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}

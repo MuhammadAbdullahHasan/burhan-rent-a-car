@@ -11,7 +11,11 @@ owner. Devices never seed themselves; they pull from here.
         python3 deploy/load_dataset_to_cloud.py build/dataset.db
 
 Refuses to run if the cloud already holds any rental, so it can never
-overwrite real records. Credentials come from the environment only.
+overwrite real records -- unless --replace is given, which first deletes
+every attachment, rental, vehicle and customer the owner has in the cloud
+(used once, to swap the development dataset for the real history). Devices
+notice the new dataset generation and re-download in full.
+Credentials come from the environment only.
 """
 import json
 import os
@@ -55,14 +59,16 @@ def rows(db, table):
 
 
 def main():
-    if len(sys.argv) != 2:
+    args = [a for a in sys.argv[1:] if a != "--replace"]
+    replace = "--replace" in sys.argv
+    if len(args) != 1:
         sys.exit(__doc__)
     email = os.environ.get("SUPABASE_EMAIL")
     password = os.environ.get("SUPABASE_PASSWORD")
     if not email or not password:
         sys.exit("Set SUPABASE_EMAIL and SUPABASE_PASSWORD in the environment.")
 
-    db = sqlite3.connect(sys.argv[1])
+    db = sqlite3.connect(args[0])
     customers = rows(db, "customers")
     vehicles = rows(db, "vehicles")
     rentals = rows(db, "rentals")
@@ -80,8 +86,19 @@ def main():
     token = auth["access_token"]
 
     _, existing = call("GET", "/rest/v1/rentals?select=id&limit=1", token=token)
-    if existing:
-        sys.exit("The cloud already holds rentals; refusing to bulk-load over them.")
+    if existing and not replace:
+        sys.exit("The cloud already holds rentals; refusing to bulk-load over them "
+                 "(pass --replace to wipe them first).")
+    if replace:
+        # Children before parents (attachments -> rentals -> customers/vehicles).
+        for table in ("attachments", "rentals", "vehicles", "customers"):
+            _, before = call("GET", f"/rest/v1/{table}?select=id", token=token)
+            call("DELETE", f"/rest/v1/{table}?id=not.is.null", token=token,
+                 prefer="return=minimal")
+            _, after = call("GET", f"/rest/v1/{table}?select=id&limit=1", token=token)
+            if after:
+                sys.exit(f"{table}: rows remain after delete; stopping.")
+            print(f"{table}: {len(before)} old rows deleted")
 
     for table, data in (("customers", customers), ("vehicles", vehicles),
                         ("rentals", rentals)):

@@ -67,6 +67,16 @@ class ImportPipeline {
       return map;
     }).toList();
 
+    return importRows(db, rawRows);
+  }
+
+  /// Imports already-parsed rows (header -> value). This is the entry point
+  /// for sources that aren't a single flat CSV -- e.g. the legacy multi-table
+  /// dump, which is split and cleaned before it reaches the pipeline.
+  Future<ReconciliationReport> importRows(
+    Database db,
+    List<Map<String, String>> rawRows,
+  ) async {
     final report = ReconciliationReport();
     final mapped = <MappedRentalRow>[];
     final seenRentalNos = <int>{};
@@ -122,11 +132,12 @@ class ImportPipeline {
         report.rentalsInserted++;
       }
 
+      // The sequence starts at #1 whatever the first surviving row is, so a
+      // history whose earliest agreements were gap markers still shows them.
       final allNos = mapped.map((r) => r.rentalNo).toList()..sort();
-      final min = allNos.first;
       final max = allNos.last;
       final present = allNos.toSet();
-      for (var n = min; n <= max; n++) {
+      for (var n = 1; n <= max; n++) {
         if (!present.contains(n)) {
           await rentals.insert(txn, rentalNo: n, isPlaceholder: true);
           report.placeholdersInserted++;
@@ -139,7 +150,7 @@ class ImportPipeline {
     return report;
   }
 
-  Future<String> _resolveCustomer(
+  Future<String?> _resolveCustomer(
     DatabaseExecutor txn,
     MappedRentalRow row,
     ReconciliationReport report,
@@ -147,13 +158,35 @@ class ImportPipeline {
     final phoneNorm = normalizeDigits(row.customerPhone);
     final cnicNorm = normalizeDigits(row.customerCnic);
 
-    Map<String, Object?>? existing;
-    if (phoneNorm != null) {
-      existing = await customers.findByPhoneNormalized(txn, phoneNorm);
+    // Nothing to identify a person by (a cancelled or blank agreement): the
+    // rental keeps its number and shows N/A for the customer rather than
+    // pointing at an empty customer record.
+    if (normalizeNullable(row.customerName) == null &&
+        phoneNorm == null &&
+        cnicNorm == null) {
+      return null;
     }
-    existing ??= cnicNorm != null
-        ? await customers.findByCnicNormalized(txn, cnicNorm)
-        : null;
+
+    // CNIC is a legal identifier, so a match there is the same person even
+    // when the name was spelled differently. A phone number is shared across
+    // a household, so it only counts when the name agrees too -- otherwise
+    // a son's rental would show under his father's name.
+    Map<String, Object?>? existing;
+    if (cnicNorm != null) {
+      existing = await customers.findByCnicNormalized(txn, cnicNorm);
+    }
+    if (existing == null && phoneNorm != null) {
+      for (final candidate
+          in await customers.findAllByPhoneNormalized(txn, phoneNorm)) {
+        if (sameCustomerName(
+          candidate['full_name'] as String?,
+          row.customerName,
+        )) {
+          existing = candidate;
+          break;
+        }
+      }
+    }
 
     if (existing != null) {
       await customers.backfill(
