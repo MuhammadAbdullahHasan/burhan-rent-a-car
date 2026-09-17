@@ -199,6 +199,16 @@ class _SearchScreenState extends State<SearchScreen> {
   void _selectCategory(SearchCategory category) {
     if (category == _category) return;
     setState(() => _category = category);
+    // An open keyboard keeps the layout it was opened with; it only reads
+    // the new keyboardType when the field is focused afresh. Drop focus and
+    // take it back after this frame, so Rental #/Mobile/CNIC get the number
+    // pad and Customer/Vehicle Reg get letters.
+    if (_focus.hasFocus) {
+      _focus.unfocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
     final text = _controller.text;
     if (category.digitsOnly) {
       // Digits-only category: keep only what it can search.

@@ -66,7 +66,8 @@ class VehicleRepository {
     return db.rawQuery('''
       SELECT v.*,
              COUNT(r.id) AS rental_count,
-             COUNT(DISTINCT r.customer_id) AS customer_count
+             COUNT(DISTINCT r.customer_id) AS customer_count,
+             MAX(r.start_date) AS last_rental_on
       FROM vehicles v
       LEFT JOIN rentals r
         ON r.vehicle_id = v.id AND r.is_deleted = 0 AND r.is_placeholder = 0
@@ -74,6 +75,35 @@ class VehicleRepository {
       GROUP BY v.id
       ORDER BY v.registration_no COLLATE NOCASE ASC
     ''');
+  }
+
+  /// Whether a [listWithStats] row is part of the working fleet rather than
+  /// a plate from the old records. Twenty years of history name ~400
+  /// vehicles, most last rented before 2015; the fleet is the ones rented
+  /// within [idleYears] years, plus anything the owner has described
+  /// (make, model, chassis, insurance) or added by hand and not rented yet.
+  static bool isInFleet(Map<String, Object?> row,
+      {DateTime? now, int idleYears = 2}) {
+    final last = row['last_rental_on'] as String?;
+    if (last == null) return true; // never rented: just added by hand
+    final lastDate = DateTime.tryParse(last);
+    if (lastDate != null) {
+      final today = now ?? DateTime.now();
+      if (!lastDate
+          .isBefore(DateTime(today.year - idleYears, today.month, today.day))) {
+        return true;
+      }
+    }
+    for (final col in [
+      'company',
+      'model_name',
+      'chassis_no',
+      'engine_no',
+      'insurance_due_on'
+    ]) {
+      if ((row[col] as String?)?.trim().isNotEmpty ?? false) return true;
+    }
+    return false;
   }
 
   /// Distinct customers who have rented this vehicle, each with how many

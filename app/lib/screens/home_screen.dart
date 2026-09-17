@@ -46,12 +46,19 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (dialog) => AlertDialog(
         icon: Icon(Icons.shield_outlined, color: theme.colorScheme.error),
-        title: const Text('Insurance due'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final vehicle in due)
-              ListTile(
+        title: Text(
+          due.length == 1 ? 'Insurance due' : 'Insurance due · ${due.length}',
+        ),
+        // Scrolls: the real fleet can have twenty vehicles overdue at once,
+        // and the buttons must stay reachable below the list.
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: due.length,
+            itemBuilder: (_, i) {
+              final vehicle = due[i];
+              return ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.directions_car),
                 title: Text(displayOrNA(vehicle['registration_no'])),
@@ -61,8 +68,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.pop(dialog);
                   _updateInsurance(vehicle);
                 },
-              ),
-          ],
+              );
+            },
+          ),
         ),
         actions: [
           TextButton(

@@ -21,6 +21,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
   late Future<List<Map<String, Object?>>> _future;
   ValueNotifier<int>? _dataChanged;
 
+  /// The old records name hundreds of plates last rented a decade ago.
+  /// They keep their history and stay searchable, but the inventory shows
+  /// the working fleet unless the owner asks for the rest.
+  bool _showPast = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -87,8 +92,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               );
             }
-            final vehicles = snapshot.data ?? const [];
-            if (vehicles.isEmpty) {
+            final all = snapshot.data ?? const [];
+            if (all.isEmpty) {
               return const SliverFillRemaining(
                 hasScrollBody: false,
                 child: EmptyState(
@@ -97,52 +102,89 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               );
             }
-            return SliverLayoutBuilder(
-              builder: (context, constraints) {
-                // Responsive: one column on a phone, more on a tablet.
-                final width = constraints.crossAxisExtent;
-                final columns = width > 900
-                    ? 3
-                    : width > 600
-                        ? 2
-                        : 1;
-                return SliverPadding(
-                  padding: EdgeInsets.fromLTRB(
-                    16,
-                    12,
-                    16,
-                    ShowroomScaffold.bottomInset(context),
-                  ),
-                  sliver: SliverGrid(
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: columns,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      mainAxisExtent: 148,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, i) => _VehicleCard(
-                        vehicle: vehicles[i],
-                        onTap: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => VehicleDetailScreen(
-                                vehicleId: vehicles[i]['id'] as String,
-                              ),
-                            ),
-                          );
-                          _reload();
-                        },
-                      ),
-                      childCount: vehicles.length,
+            final fleet = all.where(VehicleRepository.isInFleet).toList();
+            final past = all.length - fleet.length;
+            final vehicles = _showPast ? all : fleet;
+            return SliverMainAxisGroup(slivers: [
+              if (past > 0)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  sliver: SliverToBoxAdapter(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _showPast
+                                ? 'All ${all.length} vehicles'
+                                : 'Fleet · ${fleet.length} vehicles',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _showPast = !_showPast),
+                          icon: Icon(_showPast
+                              ? Icons.visibility_off_outlined
+                              : Icons.history),
+                          label: Text(_showPast
+                              ? 'Hide past vehicles'
+                              : 'Show $past past vehicles'),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              },
-            );
+                ),
+              _grid(vehicles),
+            ]);
           },
         ),
       ],
+    );
+  }
+
+  Widget _grid(List<Map<String, Object?>> vehicles) {
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        // Responsive: one column on a phone, more on a tablet.
+        final width = constraints.crossAxisExtent;
+        final columns = width > 900
+            ? 3
+            : width > 600
+                ? 2
+                : 1;
+        return SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            12,
+            16,
+            ShowroomScaffold.bottomInset(context),
+          ),
+          sliver: SliverGrid(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              mainAxisExtent: 148,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => _VehicleCard(
+                vehicle: vehicles[i],
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => VehicleDetailScreen(
+                        vehicleId: vehicles[i]['id'] as String,
+                      ),
+                    ),
+                  );
+                  _reload();
+                },
+              ),
+              childCount: vehicles.length,
+            ),
+          ),
+        );
+      },
     );
   }
 }
