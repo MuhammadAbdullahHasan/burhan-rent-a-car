@@ -6,5 +6,5 @@
 /// `owner_id = auth.uid()` (see supabase_migration.sql), so committing this
 /// value is standard practice, not a credential leak. Never put a
 /// service-role key here or anywhere client-side.
-const supabaseUrl = 'https://qaezjbadebwonreoggds.supabase.co';
-const supabasePublishableKey = 'sb_publishable__fTN9ntFwaCAFSt83Zj0XQ_qT-HDmFW';
+const supabaseUrl = 'https://oxkebeulfbgcxfaattna.supabase.co';
+const supabasePublishableKey = 'sb_publishable_YVCUYvjXYsObRg6vZmxybQ_fdg6CpXZ';

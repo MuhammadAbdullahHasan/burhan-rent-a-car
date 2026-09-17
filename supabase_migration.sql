@@ -139,23 +139,23 @@ alter table audit_log enable row level security;
 
 -- Single-owner today, but enforced per-row at the DB layer regardless --
 -- ready for a second staff login later without any policy changes.
-create policy "owner reads own customers" on customers for select using (owner_id = auth.uid());
-create policy "owner writes own customers" on customers for insert with check (owner_id = auth.uid());
-create policy "owner updates own customers" on customers for update using (owner_id = auth.uid());
-create policy "owner deletes own customers" on customers for delete using (owner_id = auth.uid());
+create policy "owner reads own customers" on customers for select using (owner_id = (select auth.uid()));
+create policy "owner writes own customers" on customers for insert with check (owner_id = (select auth.uid()));
+create policy "owner updates own customers" on customers for update using (owner_id = (select auth.uid()));
+create policy "owner deletes own customers" on customers for delete using (owner_id = (select auth.uid()));
 
-create policy "owner reads own vehicles" on vehicles for select using (owner_id = auth.uid());
-create policy "owner writes own vehicles" on vehicles for insert with check (owner_id = auth.uid());
-create policy "owner updates own vehicles" on vehicles for update using (owner_id = auth.uid());
-create policy "owner deletes own vehicles" on vehicles for delete using (owner_id = auth.uid());
+create policy "owner reads own vehicles" on vehicles for select using (owner_id = (select auth.uid()));
+create policy "owner writes own vehicles" on vehicles for insert with check (owner_id = (select auth.uid()));
+create policy "owner updates own vehicles" on vehicles for update using (owner_id = (select auth.uid()));
+create policy "owner deletes own vehicles" on vehicles for delete using (owner_id = (select auth.uid()));
 
-create policy "owner reads own rentals" on rentals for select using (owner_id = auth.uid());
-create policy "owner writes own rentals" on rentals for insert with check (owner_id = auth.uid());
-create policy "owner updates own rentals" on rentals for update using (owner_id = auth.uid());
-create policy "owner deletes own rentals" on rentals for delete using (owner_id = auth.uid());
+create policy "owner reads own rentals" on rentals for select using (owner_id = (select auth.uid()));
+create policy "owner writes own rentals" on rentals for insert with check (owner_id = (select auth.uid()));
+create policy "owner updates own rentals" on rentals for update using (owner_id = (select auth.uid()));
+create policy "owner deletes own rentals" on rentals for delete using (owner_id = (select auth.uid()));
 
-create policy "owner reads own audit log" on audit_log for select using (owner_id = auth.uid());
-create policy "owner writes own audit log" on audit_log for insert with check (owner_id = auth.uid());
+create policy "owner reads own audit log" on audit_log for select using (owner_id = (select auth.uid()));
+create policy "owner writes own audit log" on audit_log for insert with check (owner_id = (select auth.uid()));
 
 -- Agreement photos, one row per image, synced like every other entity.
 -- Stored base64-encoded so the same payload shape works over PostgREST in
@@ -176,10 +176,10 @@ create table attachments (
 );
 create index idx_attachments_entity on attachments(entity_type, entity_id);
 alter table attachments enable row level security;
-create policy "owner reads own attachments" on attachments for select using (owner_id = auth.uid());
-create policy "owner writes own attachments" on attachments for insert with check (owner_id = auth.uid());
-create policy "owner updates own attachments" on attachments for update using (owner_id = auth.uid());
-create policy "owner deletes own attachments" on attachments for delete using (owner_id = auth.uid());
+create policy "owner reads own attachments" on attachments for select using (owner_id = (select auth.uid()));
+create policy "owner writes own attachments" on attachments for insert with check (owner_id = (select auth.uid()));
+create policy "owner updates own attachments" on attachments for update using (owner_id = (select auth.uid()));
+create policy "owner deletes own attachments" on attachments for delete using (owner_id = (select auth.uid()));
 
 -- Incremental pull: "everything changed since this device last synced".
 create index idx_customers_updated on customers(owner_id, updated_at);
@@ -263,8 +263,6 @@ revoke execute on function public.log_audit() from public, anon, authenticated;
 revoke execute on function public.touch_synced_at() from public, anon, authenticated;
 alter function public.touch_synced_at() set search_path = public;
 
--- RLS: (select auth.uid()) is evaluated once per statement instead of once
--- per row. Every policy above is defined this way on the live project:
---   using (owner_id = (select auth.uid()))
---   with check (owner_id = (select auth.uid()))
+-- RLS: every policy above uses (select auth.uid()) so it is evaluated once
+-- per statement instead of once per row.
 create index idx_audit_actor on audit_log(actor);

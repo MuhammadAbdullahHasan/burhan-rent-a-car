@@ -20,8 +20,8 @@ import sys
 import urllib.error
 import urllib.request
 
-URL = "https://qaezjbadebwonreoggds.supabase.co"
-KEY = "sb_publishable__fTN9ntFwaCAFSt83Zj0XQ_qT-HDmFW"  # client-safe publishable key
+URL = "https://oxkebeulfbgcxfaattna.supabase.co"
+KEY = "sb_publishable_YVCUYvjXYsObRg6vZmxybQ_fdg6CpXZ"  # client-safe publishable key
 BATCH = 200
 
 
