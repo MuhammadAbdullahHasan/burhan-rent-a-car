@@ -50,7 +50,7 @@ void main() {
     }
   });
 
-  testWidgets('insurance due within a month is announced once a day',
+  testWidgets('insurance due within a month is announced on every launch',
       (t) async {
     // KHI-654's insurance is due 2026-09-30 in the test data; the other
     // two vehicles are due in November and December.
@@ -62,12 +62,14 @@ void main() {
     await tapAndSettle(t, find.text('Later'));
     expect(alert, findsNothing);
 
-    // Opening the app again the same day stays quiet...
+    // "Later" is no snooze: the next launch brings it straight back...
     await t.pumpWidget(const SizedBox());
     await helpers.pumpApp(t, services, keepInsuranceAlert: true);
-    expect(alert, findsNothing);
-    // ...but the Needs Attention tile still carries it.
-    expect(find.textContaining('Insurance due'), findsOneWidget);
+    expect(alert, findsOneWidget);
+
+    // ...and "Done" goes to the vehicle's form to move the date on.
+    await tapAndSettle(t, find.text('Done'));
+    expect(find.text('Edit Vehicle'), findsOneWidget);
   });
 
   testWidgets('the Last Rental tile opens that rental', (t) async {
