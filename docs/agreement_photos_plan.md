@@ -23,10 +23,22 @@ This is fine for a few hundred photos. For the archive it is not:
 ## Target design
 
 1. **Full-size photos go to Supabase Storage**, a private bucket
-   `agreements`, one object per attachment at
-   `<owner_id>/<rental_id>/<attachment_id>.jpg`. The existing
-   `backups` bucket already shows the pattern: a storage policy that
-   only lets `auth.uid()` read or write inside its own top-level folder.
+   `agreements`, **named by rental number** — the owner's archive is
+   already organised that way (`1.jpg` … `9xxx.jpg`, one file per
+   rental, some rentals without a photo) and every new photo follows the
+   same rule: the photo of rental #96 is stored as `96.jpg`, a second
+   photo of the same rental as `96-2.jpg`. Object path:
+   `<owner_id>/<rental_no>.jpg`. The existing `backups` bucket already
+   shows the pattern: a storage policy that only lets `auth.uid()` read
+   or write inside its own top-level folder.
+
+   A rental created offline has no number until the cloud assigns one,
+   so its photo is uploaded only once the rental itself has been pushed
+   and numbered (the outbox already sends rentals before attachments).
+   Until then the photo lives locally, as today.
+
+   **Rentals with no photo in the archive stay without one.** The import
+   never substitutes a placeholder image.
 2. **The `attachments` table keeps only metadata and the thumbnail**
    (≈ 8–15 KB each → ~100 MB for the archive, well inside the DB limit):
    `id, owner_id, entity_type, entity_id, kind, mime_type, storage_path,
@@ -39,13 +51,13 @@ This is fine for a few hundred photos. For the archive it is not:
    storage → then upsert the metadata row (so a row never points at a
    missing object). A failed upload stays queued, as today.
 5. **Bulk import of the archive** (one-off script, run from the Mac):
-   * input: a folder of photos whose file names carry the rental number
-     (`1234.jpg`, `1234-2.jpg`, …) — to be confirmed against the real
-     files;
+   * input: the owner's folder of photos named by rental number
+     (`1.jpg` … `9xxx.jpg`; a second photo of a rental as `1234-2.jpg`);
    * for each file: match the rental by number, re-encode to 1600 px q85
      (typically 60–110 KB), cut the thumbnail, upload the object, insert
-     the metadata row; skip and report anything that does not match a
-     rental;
+     the metadata row; a file whose number matches no rental is reported
+     and skipped, never invented a rental for;
+   * rentals with no file are left without a photo;
    * idempotent: re-running skips objects that already exist.
 
 ## Plan and hosting
