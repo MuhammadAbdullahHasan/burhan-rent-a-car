@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
+
 import 'package:flutter/material.dart';
 
 import 'common.dart';
@@ -110,6 +111,8 @@ class RentalTile extends StatelessWidget {
             displayOrNA(_formatAmount(rental['amount'])),
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
+              letterSpacing: 0,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
           if (rental['balance'] != null && (rental['balance'] as num) > 0)

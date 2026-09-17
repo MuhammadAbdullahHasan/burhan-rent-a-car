@@ -7,6 +7,7 @@ import '../sync/sync_actions.dart';
 import '../widgets/sync_status_bar.dart';
 import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
+import '../widgets/pressable.dart';
 import '../widgets/rental_tile.dart';
 import '../widgets/showroom_scaffold.dart';
 import 'rental_detail_screen.dart';
@@ -161,122 +162,136 @@ class _HomeScreenState extends State<HomeScreen> {
         icon: const Icon(Icons.add),
         label: const Text('New Rental'),
       ),
-      body: FutureBuilder<_Dashboard>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return EmptyState(
-              icon: Icons.error_outline,
-              message: 'Could not load this record:\n${snapshot.error}',
-            );
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final data = snapshot.data!;
-          return RefreshIndicator(
-            onRefresh: () async => _reload(),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-              children: [
-                if (AppScope.of(context).cloudSync != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: SyncStatusBar(
-                      status: AppScope.of(context).syncStatus,
-                      onTap: _syncNow,
-                    ),
-                  ),
-                _QuickNav(
-                  onSearch: () => _shell(context)?.goToTab(1),
-                  onLibrary: () => _shell(context)?.goToTab(2),
+      onRefresh: () async => _reload(),
+      slivers: [
+        FutureBuilder<_Dashboard>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return SliverFillRemaining(
+                hasScrollBody: false,
+                child: EmptyState(
+                  icon: Icons.error_outline,
+                  message: 'Could not load this record:\n${snapshot.error}',
                 ),
-                const SizedBox(height: 16),
-                if (data.notifications.isNotEmpty) ...[
-                  SectionCard(
-                    title: 'NEEDS ATTENTION',
-                    child: Column(
-                      children: [
-                        for (final note in data.notifications)
-                          _NotificationRow(
-                            note: note,
-                            onTap: note.isSyncPrompt
-                                ? _syncNow
-                                : note.isConflictPrompt
-                                    ? _openConflicts
-                                    : note.vehicle == null
-                                        ? null
-                                        : () async {
-                                            await Navigator.of(context).push(
-                                              MaterialPageRoute(
-                                                builder: (_) =>
-                                                    VehicleDetailScreen(
-                                                  vehicleId: note.vehicle!['id']
-                                                      as String,
-                                                ),
-                                              ),
-                                            );
-                                            _reload();
-                                          },
-                          ),
-                      ],
+              );
+            }
+            if (!snapshot.hasData) {
+              return const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final data = snapshot.data!;
+            return SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                12,
+                16,
+                ShowroomScaffold.bottomInset(context, hasFab: true),
+              ),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  if (AppScope.of(context).cloudSync != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SyncStatusBar(
+                        status: AppScope.of(context).syncStatus,
+                        onTap: _syncNow,
+                      ),
                     ),
+                  _QuickNav(
+                    onSearch: () => _shell(context)?.goToTab(1),
+                    onLibrary: () => _shell(context)?.goToTab(2),
                   ),
                   const SizedBox(height: 16),
-                ],
-                SectionCard(
-                  title: 'ACTIVE / UNCLOSED RENTALS',
-                  action: Text(
-                    '${data.unclosedTotal}',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.primary,
+                  if (data.notifications.isNotEmpty) ...[
+                    SectionCard(
+                      title: 'NEEDS ATTENTION',
+                      child: Column(
+                        children: [
+                          for (final note in data.notifications)
+                            _NotificationRow(
+                              note: note,
+                              onTap: note.isSyncPrompt
+                                  ? _syncNow
+                                  : note.isConflictPrompt
+                                      ? _openConflicts
+                                      : note.vehicle == null
+                                          ? null
+                                          : () async {
+                                              await Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      VehicleDetailScreen(
+                                                    vehicleId:
+                                                        note.vehicle!['id']
+                                                            as String,
+                                                  ),
+                                                ),
+                                              );
+                                              _reload();
+                                            },
+                            ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(height: 16),
+                  ],
+                  SectionCard(
+                    title: 'ACTIVE / UNCLOSED RENTALS',
+                    action: Text(
+                      '${data.unclosedTotal}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: data.unclosed.isEmpty
+                        ? const EmptyState(
+                            icon: Icons.check_circle_outline,
+                            message: 'No unclosed rentals.',
+                          )
+                        : Column(
+                            children: [
+                              for (final rental in data.unclosed)
+                                RentalTile(
+                                  rental: rental,
+                                  onTap: () => _openRental(rental),
+                                ),
+                            ],
+                          ),
                   ),
-                  child: data.unclosed.isEmpty
-                      ? const EmptyState(
-                          icon: Icons.check_circle_outline,
-                          message: 'No unclosed rentals.',
-                        )
-                      : Column(
-                          children: [
-                            for (final rental in data.unclosed)
-                              RentalTile(
-                                rental: rental,
-                                onTap: () => _openRental(rental),
-                              ),
-                          ],
-                        ),
-                ),
-                const SizedBox(height: 16),
-                SectionCard(
-                  title: 'RECENT RENTALS',
-                  child: data.recent.isEmpty
-                      ? EmptyState(
-                          icon: data.awaitingFirstDownload
-                              ? Icons.cloud_download_outlined
-                              : Icons.history,
-                          message: data.awaitingFirstDownload
-                              ? 'Downloading your records from the cloud… '
-                                  'If this takes long, check the internet '
-                                  'connection and tap Sync Now.'
-                              : 'No rentals recorded yet.',
-                        )
-                      : Column(
-                          children: [
-                            for (final rental in data.recent)
-                              RentalTile(
-                                rental: rental,
-                                onTap: () => _openRental(rental),
-                              ),
-                          ],
-                        ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+                  const SizedBox(height: 16),
+                  SectionCard(
+                    title: 'RECENT RENTALS',
+                    child: data.recent.isEmpty
+                        ? EmptyState(
+                            icon: data.awaitingFirstDownload
+                                ? Icons.cloud_download_outlined
+                                : Icons.history,
+                            message: data.awaitingFirstDownload
+                                ? 'Downloading your records from the cloud… '
+                                    'If this takes long, check the internet '
+                                    'connection and tap Sync Now.'
+                                : 'No rentals recorded yet.',
+                          )
+                        : Column(
+                            children: [
+                              for (final rental in data.recent)
+                                RentalTile(
+                                  rental: rental,
+                                  onTap: () => _openRental(rental),
+                                ),
+                            ],
+                          ),
+                  ),
+                ]),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -448,10 +463,9 @@ class _NavCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+    return Pressable(
+      onTap: onTap,
+      child: Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(

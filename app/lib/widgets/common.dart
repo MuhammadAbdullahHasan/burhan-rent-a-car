@@ -138,12 +138,14 @@ class StatusChip extends StatelessWidget {
     final theme = Theme.of(context);
     final label = displayOrNA(status);
     final isClosed = label.toLowerCase() == 'closed';
-    final color =
-        isClosed ? theme.colorScheme.outline : const Color(0xFF1E7A46);
+    final open = theme.brightness == Brightness.dark
+        ? const Color(0xFF6CCB8B)
+        : const Color(0xFF1E7A46);
+    final color = isClosed ? theme.colorScheme.outline : open;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
+        color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(

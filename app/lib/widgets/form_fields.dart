@@ -110,7 +110,7 @@ class AppTextField extends StatelessWidget {
           filled: true,
           fillColor: readOnly
               ? Theme.of(context).colorScheme.surfaceContainerHighest
-              : Colors.white,
+              : Theme.of(context).colorScheme.surfaceContainer,
         ),
         validator: (value) {
           if (required && (value == null || value.trim().isEmpty)) {

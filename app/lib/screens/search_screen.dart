@@ -266,77 +266,90 @@ class _SearchScreenState extends State<SearchScreen> {
     final theme = Theme.of(context);
     return ShowroomScaffold(
       title: 'Search Records',
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  TextField(
-                    key: const Key('search_field'),
-                    controller: _controller,
-                    focusNode: _focus,
-                    keyboardType: _category.keyboard,
-                    inputFormatters: _category.formatters,
-                    textInputAction: TextInputAction.search,
-                    onChanged: _onChanged,
-                    onSubmitted: _onSubmitted,
-                    decoration: InputDecoration(
-                      hintText: 'Search by Rental, Customer, Mobile, CNIC, '
-                          'or Vehicle Reg…',
-                      filled: true,
-                      fillColor: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.5),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(28),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 16,
-                      ),
-                      suffixIcon: _controller.text.isEmpty
-                          ? Icon(Icons.search, color: theme.colorScheme.primary)
-                          : IconButton(
-                              tooltip: 'Clear',
-                              icon: const Icon(Icons.close),
-                              onPressed: _clear,
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
+      slivers: [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            12,
+            16,
+            ShowroomScaffold.bottomInset(context),
+          ),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate([
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
                     children: [
-                      for (final category in SearchCategory.all)
-                        ChoiceChip(
-                          label: Text(category.chip),
-                          selected: _category == category,
-                          showCheckmark: false,
-                          onSelected: (_) => _selectCategory(category),
+                      TextField(
+                        key: const Key('search_field'),
+                        controller: _controller,
+                        focusNode: _focus,
+                        keyboardType: _category.keyboard,
+                        inputFormatters: _category.formatters,
+                        textInputAction: TextInputAction.search,
+                        onChanged: _onChanged,
+                        onSubmitted: _onSubmitted,
+                        decoration: InputDecoration(
+                          hintText: 'Search by Rental, Customer, Mobile, CNIC, '
+                              'or Vehicle Reg…',
+                          filled: true,
+                          fillColor: theme.colorScheme.surfaceContainerHigh,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(28),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(28),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 16,
+                          ),
+                          suffixIcon: _controller.text.isEmpty
+                              ? Icon(Icons.search,
+                                  color: theme.colorScheme.primary)
+                              : IconButton(
+                                  tooltip: 'Clear',
+                                  icon: const Icon(Icons.close),
+                                  onPressed: _clear,
+                                ),
                         ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          for (final category in SearchCategory.all)
+                            ChoiceChip(
+                              label: Text(category.chip),
+                              selected: _category == category,
+                              showCheckmark: false,
+                              onSelected: (_) => _selectCategory(category),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
+              if (_searching)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+              const SizedBox(height: 16),
+              if (_lastQuery.isEmpty)
+                _recentSection(theme)
+              else
+                _resultsSection(theme),
+            ]),
           ),
-          if (_searching)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: LinearProgressIndicator(minHeight: 2),
-            ),
-          const SizedBox(height: 16),
-          if (_lastQuery.isEmpty)
-            _recentSection(theme)
-          else
-            _resultsSection(theme),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

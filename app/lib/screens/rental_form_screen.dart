@@ -743,7 +743,7 @@ class _PickerTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Material(
-      color: Colors.white,
+      color: theme.colorScheme.surfaceContainer,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,

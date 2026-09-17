@@ -67,49 +67,82 @@ class _LibraryScreenState extends State<LibraryScreen> {
           icon: const Icon(Icons.add),
         ),
       ],
-      body: RefreshIndicator(
-        onRefresh: () async => _reload(),
-        child: AsyncList<Map<String, Object?>>(
+      onRefresh: () async => _reload(),
+      slivers: [
+        FutureBuilder<List<Map<String, Object?>>>(
           future: _future,
-          emptyIcon: Icons.directions_car_outlined,
-          emptyMessage: 'No vehicles yet.',
-          builder: (context, vehicles) {
-            return LayoutBuilder(
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (snapshot.hasError) {
+              return SliverFillRemaining(
+                hasScrollBody: false,
+                child: EmptyState(
+                  icon: Icons.error_outline,
+                  message: 'Could not load data:\n${snapshot.error}',
+                ),
+              );
+            }
+            final vehicles = snapshot.data ?? const [];
+            if (vehicles.isEmpty) {
+              return const SliverFillRemaining(
+                hasScrollBody: false,
+                child: EmptyState(
+                  icon: Icons.directions_car_outlined,
+                  message: 'No vehicles yet.',
+                ),
+              );
+            }
+            return SliverLayoutBuilder(
               builder: (context, constraints) {
                 // Responsive: one column on a phone, more on a tablet.
-                final columns = constraints.maxWidth > 900
+                final width = constraints.crossAxisExtent;
+                final columns = width > 900
                     ? 3
-                    : constraints.maxWidth > 600
+                    : width > 600
                         ? 2
                         : 1;
-                return GridView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: vehicles.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    mainAxisExtent: 148,
+                return SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    12,
+                    16,
+                    ShowroomScaffold.bottomInset(context),
                   ),
-                  itemBuilder: (context, i) => _VehicleCard(
-                    vehicle: vehicles[i],
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => VehicleDetailScreen(
-                            vehicleId: vehicles[i]['id'] as String,
-                          ),
-                        ),
-                      );
-                      _reload();
-                    },
+                  sliver: SliverGrid(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      mainAxisExtent: 148,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, i) => _VehicleCard(
+                        vehicle: vehicles[i],
+                        onTap: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => VehicleDetailScreen(
+                                vehicleId: vehicles[i]['id'] as String,
+                              ),
+                            ),
+                          );
+                          _reload();
+                        },
+                      ),
+                      childCount: vehicles.length,
+                    ),
                   ),
                 );
               },
             );
           },
         ),
-      ),
+      ],
     );
   }
 }
