@@ -3,3 +3,13 @@ build/
 *.db
 .DS_Store
 *.apk
+
+# The client's data lives in the app and the cloud only -- never in this
+# public repository. Exports of the old system, imported databases and
+# any CSV outside the fictional dev sample are blocked from commits.
+*.sql
+!supabase_migration.sql
+*.csv
+!test_data/burhan_rent_a_car_temporary_test.csv
+*.sqlite
+*.sqlite3
