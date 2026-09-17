@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'email_rate_limit.dart';
+
 /// Thin wrapper around Supabase Auth: email + password, with email-based
 /// confirmation and password recovery. Single-owner app -- no second
 /// factor by design.
@@ -27,19 +29,22 @@ class AuthService {
     return _auth.signInWithPassword(email: email, password: password);
   }
 
-  Future<void> signUp({required String email, required String password}) {
-    return _auth.signUp(email: email, password: password);
+  Future<void> signUp({required String email, required String password}) async {
+    await _auth.signUp(email: email, password: password);
+    await EmailRateLimit.recordSend();
   }
 
   /// Re-sends the sign-up confirmation email for an account that exists but
   /// hasn't clicked its link yet -- the failure mode behind "Email not
   /// confirmed" on sign-in.
-  Future<void> resendConfirmation(String email) {
-    return _auth.resend(type: OtpType.signup, email: email);
+  Future<void> resendConfirmation(String email) async {
+    await _auth.resend(type: OtpType.signup, email: email);
+    await EmailRateLimit.recordSend();
   }
 
-  Future<void> sendPasswordResetEmail(String email) {
-    return _auth.resetPasswordForEmail(email);
+  Future<void> sendPasswordResetEmail(String email) async {
+    await _auth.resetPasswordForEmail(email);
+    await EmailRateLimit.recordSend();
   }
 
   /// Sets a new password for the currently signed-in user -- used after a

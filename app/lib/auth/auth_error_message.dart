@@ -15,8 +15,10 @@ String authErrorMessage(Object error, {required String fallback}) {
       return "This email hasn't been confirmed yet. Check your inbox (and "
           'spam) for the confirmation link, or resend it below.';
     }
-    if (msg.contains('rate limit')) {
-      return 'Too many attempts. Please wait a few minutes and try again.';
+    if (msg.contains('rate limit') || msg.contains('after ')) {
+      // The screens show a live countdown for this case; this text is the
+      // fallback when they cannot.
+      return 'Email limit reached. Please wait for the hour to pass.';
     }
     if (msg.contains('already registered') || msg.contains('already exists')) {
       return 'An account with this email already exists. Try signing in.';
@@ -49,3 +51,10 @@ String authErrorMessage(Object error, {required String fallback}) {
 bool isUnconfirmedEmailError(Object error) =>
     error is AuthException &&
     error.message.toLowerCase().contains('email not confirmed');
+
+/// Supabase's email-sending limit (a few per hour, project-wide) or a
+/// per-request cool-down ("you can only request this after N seconds").
+bool isEmailRateLimitError(Object error) =>
+    error is AuthException &&
+    (error.message.toLowerCase().contains('rate limit') ||
+        error.message.toLowerCase().contains('after '));

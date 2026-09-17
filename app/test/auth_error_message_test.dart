@@ -19,11 +19,25 @@ void main() {
     expect(authErrorMessage(e, fallback: 'x'), contains('confirmation link'));
   });
 
-  test('rate limiting tells the user to wait', () {
+  test('rate limiting names the hourly email limit, never "a few minutes"', () {
+    final text = authErrorMessage(
+      const AuthException('email rate limit exceeded'),
+      fallback: 'x',
+    );
+    expect(text, contains('Email limit reached'));
+    expect(text, isNot(contains('few minutes')));
     expect(
-      authErrorMessage(const AuthException('email rate limit exceeded'),
-          fallback: 'x'),
-      contains('wait a few minutes'),
+      isEmailRateLimitError(const AuthException('email rate limit exceeded')),
+      isTrue,
+    );
+    expect(
+      isEmailRateLimitError(const AuthException(
+          'For security purposes, you can only request this after 4 seconds.')),
+      isTrue,
+    );
+    expect(
+      isEmailRateLimitError(const AuthException('Invalid login credentials')),
+      isFalse,
     );
   });
 
@@ -49,7 +63,8 @@ void main() {
 
   test('an unrecognised server message is passed through unchanged', () {
     expect(
-      authErrorMessage(const AuthException('Signups not allowed for this instance'),
+      authErrorMessage(
+          const AuthException('Signups not allowed for this instance'),
           fallback: 'x'),
       'Signups not allowed for this instance',
     );

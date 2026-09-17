@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'auth_error_message.dart';
+import 'email_rate_limit.dart';
 import 'auth_service.dart';
 import 'brand_backdrop.dart';
 import 'forgot_password_screen.dart';
@@ -23,6 +26,32 @@ class _SignInScreenState extends State<SignInScreen> {
   String? _error;
   bool _unconfirmed = false;
   bool _resent = false;
+
+  /// Set when the server refused because the hourly email limit is hit:
+  /// the exact moment it frees (from this device's own record) or, when
+  /// the limit was used up elsewhere, the latest it can be.
+  DateTime? _retryAt;
+  bool _retryExact = true;
+
+  Future<void> _noteRateLimit(Object error) async {
+    final fromReply = error is AuthException
+        ? EmailRateLimit.fromMessage(error.message)
+        : null;
+    final own = await EmailRateLimit.retryAt();
+    if (!mounted) return;
+    setState(() {
+      if (fromReply != null) {
+        _retryAt = DateTime.now().add(fromReply);
+        _retryExact = true;
+      } else if (own != null) {
+        _retryAt = own.toLocal();
+        _retryExact = true;
+      } else {
+        _retryAt = EmailRateLimit.latestPossible().toLocal();
+        _retryExact = false;
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -67,10 +96,14 @@ class _SignInScreenState extends State<SignInScreen> {
         _error = 'Confirmation email sent again to ${_email.text.trim()}.';
       });
     } catch (e) {
-      setState(() => _error = authErrorMessage(
-            e,
-            fallback: 'Could not resend the confirmation email.',
-          ));
+      if (isEmailRateLimitError(e)) {
+        await _noteRateLimit(e);
+      } else {
+        setState(() => _error = authErrorMessage(
+              e,
+              fallback: 'Could not resend the confirmation email.',
+            ));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -107,7 +140,16 @@ class _SignInScreenState extends State<SignInScreen> {
                           color: theme.colorScheme.onErrorContainer,
                         ),
                       ),
-                      if (_unconfirmed && !_resent)
+                      if (_retryAt != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: RetryCountdown(
+                            until: _retryAt!,
+                            exact: _retryExact,
+                            onDone: () => setState(() => _retryAt = null),
+                          ),
+                        )
+                      else if (_unconfirmed && !_resent)
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton(

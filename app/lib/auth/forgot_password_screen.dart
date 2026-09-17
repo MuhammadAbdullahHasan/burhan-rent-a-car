@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_error_message.dart';
+import 'email_rate_limit.dart';
 import 'auth_service.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -18,6 +20,45 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   String? _error;
   bool _sent = false;
 
+  /// Set when the server refused because the hourly email limit is hit:
+  /// the exact moment it frees (from this device's own record) or, when
+  /// the limit was used up elsewhere, the latest it can be.
+  DateTime? _retryAt;
+  bool _retryExact = true;
+
+  Future<void> _noteRateLimit(Object error) async {
+    final fromReply = error is AuthException
+        ? EmailRateLimit.fromMessage(error.message)
+        : null;
+    final own = await EmailRateLimit.retryAt();
+    if (!mounted) return;
+    setState(() {
+      if (fromReply != null) {
+        _retryAt = DateTime.now().add(fromReply);
+        _retryExact = true;
+      } else if (own != null) {
+        _retryAt = own.toLocal();
+        _retryExact = true;
+      } else {
+        _retryAt = EmailRateLimit.latestPossible().toLocal();
+        _retryExact = false;
+      }
+    });
+  }
+
+  Widget _retryNotice(ThemeData theme) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: RetryCountdown(
+          until: _retryAt!,
+          exact: _retryExact,
+          onDone: () => setState(() => _retryAt = null),
+        ),
+      );
+
   @override
   void dispose() {
     _email.dispose();
@@ -34,8 +75,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       await widget.authService.sendPasswordResetEmail(_email.text.trim());
       if (mounted) setState(() => _sent = true);
     } catch (e) {
-      setState(() => _error =
-          authErrorMessage(e, fallback: 'Could not send the reset email.'));
+      if (isEmailRateLimitError(e)) {
+        await _noteRateLimit(e);
+      } else {
+        setState(() => _error =
+            authErrorMessage(e, fallback: 'Could not send the reset email.'));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -91,7 +136,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             style: theme.textTheme.bodyMedium,
                           ),
                           const SizedBox(height: 20),
-                          if (_error != null) ...[
+                          if (_retryAt != null) ...[
+                            _retryNotice(theme),
+                            const SizedBox(height: 16),
+                          ] else if (_error != null) ...[
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
@@ -119,7 +167,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                           ),
                           const SizedBox(height: 20),
                           FilledButton(
-                            onPressed: _loading ? null : _submit,
+                            onPressed:
+                                _loading || _retryAt != null ? null : _submit,
                             child: Text(
                               _loading ? 'Sending…' : 'Send Reset Link',
                             ),
