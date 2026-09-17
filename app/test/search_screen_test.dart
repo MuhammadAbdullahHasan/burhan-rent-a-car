@@ -33,6 +33,7 @@ void main() {
     await pumpSearch(t);
     expect(find.byKey(const Key('search_field')), findsOneWidget);
     for (final chip in [
+      'All',
       'Rental #',
       'Customer',
       'Mobile',
@@ -44,8 +45,35 @@ void main() {
         findsOneWidget,
       );
     }
-    expect(find.text('No Recent Searches\nEnter a rental number above'),
-        findsOneWidget);
+    expect(
+      find.text('No Recent Searches\n'
+          'Type a name, rental number, mobile, CNIC or registration above'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('with no chip chosen, any kind of text finds its record',
+      (t) async {
+    await pumpSearch(t);
+    final bar = find.byKey(const Key('search_field'));
+
+    // A name -- letters must not be filtered out of the default field.
+    await t.enterText(bar, 'Khan');
+    await settle(t);
+    expect(find.text('Billa Khan'), findsOneWidget);
+    expect(find.text('Fahad Khan'), findsOneWidget);
+
+    // A registration, typed loosely.
+    await t.enterText(bar, 'khi 789');
+    await settle(t);
+    expect(find.text('KHI-789'), findsOneWidget);
+    expect(find.text('EXACT MATCH'), findsOneWidget);
+
+    // A number is a rental first, then anything else it appears in.
+    await t.enterText(bar, '23');
+    await settle(t);
+    expect(find.text('Rental #23'), findsOneWidget);
+    expect(find.text('EXACT MATCH'), findsOneWidget);
   });
 
   testWidgets('rental number field finds only that rental', (t) async {
@@ -119,6 +147,10 @@ void main() {
     await tapAndSettle(t, find.byTooltip('Clear'));
     expect(find.text('RECENT SEARCHES'), findsOneWidget);
     expect(find.widgetWithText(ListTile, 'Billa'), findsOneWidget);
+    // Six chips wrap onto two lines, which can push the history under the
+    // navigation bar at the test viewport's height.
+    await t.ensureVisible(find.widgetWithText(ListTile, 'Billa'));
+    await settle(t);
     await tapAndSettle(t, find.widgetWithText(ListTile, 'Billa'));
     expect(find.text('Billa Khan'), findsOneWidget);
   });

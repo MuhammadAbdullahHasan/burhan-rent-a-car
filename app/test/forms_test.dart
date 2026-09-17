@@ -402,6 +402,8 @@ void main() {
           ));
       await pumpApp(t);
 
+      expect(find.textContaining('Changes to sync'), findsOneWidget);
+      await tapAndSettle(t, find.text('Needs Attention'));
       expect(find.textContaining('waiting to sync'), findsOneWidget);
       expect(find.text('Sync Now'), findsOneWidget);
     });
@@ -414,9 +416,11 @@ void main() {
           ));
       await pumpApp(t);
 
+      await tapAndSettle(t, find.text('Needs Attention'));
       await tapAndSettle(t, find.text('Sync Now'));
 
       expect(find.textContaining('waiting to sync'), findsNothing);
+      expect(find.textContaining('Changes to sync'), findsNothing);
       await t.runAsync(() async {
         final pending = await services.db.query(
           'rentals',
@@ -436,15 +440,23 @@ void main() {
         (t) async {
       late String id;
       await t.runAsync(() async {
+        final billa = await services.db.query(
+          'customers',
+          where: 'full_name = ?',
+          whereArgs: ['Billa Khan'],
+        );
         id = await services.engine.createPendingRental(
           services.db,
+          customerId: billa.single['id'] as String,
           status: 'Open',
           startDate: '2026-12-31',
         );
       });
 
       await pumpApp(t);
-      await t.scrollUntilVisible(find.textContaining('Pending #').first, 300);
+      await searchFor(t, 'Billa');
+      await tapAndSettle(t, find.text('Billa Khan'));
+      await t.ensureVisible(find.textContaining('Pending #').first);
       await settle(t);
       await tapAndSettle(t, find.textContaining('Pending #').first);
       expect(find.text('Sync Now'), findsOneWidget);

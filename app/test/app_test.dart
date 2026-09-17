@@ -29,14 +29,19 @@ void main() {
     await settle(tester);
   }
 
-  testWidgets('home shows the three sections and unclosed rentals', (t) async {
+  testWidgets('home shows four tiles and the last rental number', (t) async {
     await pumpApp(t);
 
     expect(find.text('Burhan Rent-A-Car'), findsOneWidget);
     expect(find.text('New Rental'), findsOneWidget);
-    expect(find.text('ACTIVE / UNCLOSED RENTALS'), findsOneWidget);
-    // 14 rentals have status "Open" in the test data.
-    expect(find.text('14'), findsWidgets);
+    for (final tile in ['Search', 'Library', 'Needs Attention', 'Last Rental']) {
+      expect(find.text(tile), findsWidgets, reason: tile);
+    }
+    // The highest real number in the test data is 60; the rental lists
+    // that used to follow the tiles are gone.
+    expect(find.text('#60'), findsOneWidget);
+    expect(find.text('ACTIVE / UNCLOSED RENTALS'), findsNothing);
+    expect(find.text('RECENT RENTALS'), findsNothing);
 
     // All three top-level sections are reachable from the nav bar.
     final navBar = find.byType(NavigationBar);
@@ -46,11 +51,13 @@ void main() {
         findsOneWidget,
       );
     }
+  });
 
-    // Recent rentals sits further down the dashboard.
-    await t.scrollUntilVisible(find.text('RECENT RENTALS'), 300);
-    await settle(t);
-    expect(find.text('RECENT RENTALS'), findsOneWidget);
+  testWidgets('the Last Rental tile opens that rental', (t) async {
+    await pumpApp(t);
+    await tapAndSettle(t, find.text('#60'));
+    expect(find.text('Rental'), findsOneWidget);
+    expect(find.text('#60'), findsOneWidget);
   });
 
   testWidgets('library shows one card per distinct vehicle, not per rental',
@@ -115,8 +122,14 @@ void main() {
     // Created through the same engine path the New Rental form uses.
     // Real database I/O must run outside the fake-async zone.
     await t.runAsync(() async {
+      final billa = await services.db.query(
+        'customers',
+        where: 'full_name = ?',
+        whereArgs: ['Billa Khan'],
+      );
       final id = await services.engine.createPendingRental(
         services.db,
+        customerId: billa.single['id'] as String,
         status: 'Open',
         startDate: '2026-09-14',
       );
@@ -125,6 +138,11 @@ void main() {
     });
 
     await pumpApp(t);
+    // Home only ever shows the last *numbered* rental; the pending one is
+    // listed under its customer.
+    expect(find.text('#60'), findsOneWidget);
+    await searchFor(t, 'Billa');
+    await tapAndSettle(t, find.text('Billa Khan'));
     expect(find.textContaining('Pending #'), findsWidgets);
   });
 

@@ -23,8 +23,11 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
+/// One chip under the search bar. The default, "All", has no [scope] and
+/// runs every lookup at once; the others narrow the text to one field so
+/// digits can mean a rental number *or* a phone number, as the user says.
 class SearchCategory {
-  final SearchScope scope;
+  final SearchScope? scope;
   final String chip;
   final String noun;
   final TextInputType keyboard;
@@ -41,7 +44,24 @@ class SearchCategory {
   List<TextInputFormatter> get formatters =>
       digitsOnly ? [FilteringTextInputFormatter.digitsOnly] : const [];
 
+  /// Stable name for remembering recent searches.
+  String get key => scope?.name ?? 'all';
+
+  String get emptyHint => scope == null
+      ? 'Type a name, rental number, mobile, CNIC or registration above'
+      : 'Enter a $noun above';
+
+  String noMatch(String query) => scope == null
+      ? 'Nothing matched "$query".'
+      : 'No $noun matched "$query".';
+
   static const all = [
+    SearchCategory(
+      scope: null,
+      chip: 'All',
+      noun: 'record',
+      keyboard: TextInputType.text,
+    ),
     SearchCategory(
       scope: SearchScope.rentalNo,
       chip: 'Rental #',
@@ -76,7 +96,7 @@ class SearchCategory {
   ];
 
   static SearchCategory byScope(String name) => all.firstWhere(
-        (c) => c.scope.name == name,
+        (c) => c.key == name,
         orElse: () => all.first,
       );
 }
@@ -141,7 +161,7 @@ class _SearchScreenState extends State<SearchScreen> {
             'key': _recentKey,
             'value': jsonEncode([
               for (final r in _recent)
-                {'scope': r.category.scope.name, 'query': r.query},
+                {'scope': r.category.key, 'query': r.query},
             ]),
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
@@ -200,11 +220,10 @@ class _SearchScreenState extends State<SearchScreen> {
     final services = AppScope.of(context);
     final category = _category;
     setState(() => _searching = true);
-    final results = await services.search.searchScoped(
-      services.db,
-      query,
-      category.scope,
-    );
+    final scope = category.scope;
+    final results = scope == null
+        ? await services.search.search(services.db, query)
+        : await services.search.searchScoped(services.db, query, scope);
     if (!mounted || category != _category) return;
     setState(() {
       _results = results;
@@ -357,8 +376,7 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_recent.isEmpty) {
       return EmptyState(
         icon: Icons.history,
-        message: 'No Recent Searches\n'
-            'Enter a ${_category.noun} above',
+        message: 'No Recent Searches\n${_category.emptyHint}',
       );
     }
     return Column(
@@ -393,7 +411,7 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_results.isEmpty && !_searching) {
       return EmptyState(
         icon: Icons.search_off,
-        message: 'No ${_category.noun} matched "$_lastQuery".',
+        message: _category.noMatch(_lastQuery),
       );
     }
 
@@ -417,7 +435,8 @@ class _SearchScreenState extends State<SearchScreen> {
         if (partial.isNotEmpty) ...[
           _GroupLabel(
             label: exact.isEmpty
-                ? '${_category.noun.toUpperCase()} · ${partial.length} RESULT${partial.length == 1 ? '' : 'S'}'
+                ? '${_category.scope == null ? '' : '${_category.noun.toUpperCase()} · '}'
+                    '${partial.length} RESULT${partial.length == 1 ? '' : 'S'}'
                 : 'OTHER MATCHES',
             theme: theme,
           ),

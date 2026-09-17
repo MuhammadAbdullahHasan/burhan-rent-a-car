@@ -125,6 +125,19 @@ class RentalRepository {
     );
   }
 
+  /// The rental carrying the highest number -- what the business is
+  /// "on" right now. Rentals still waiting for a number, placeholders and
+  /// deleted rows don't count.
+  Future<Map<String, Object?>?> latestNumbered(DatabaseExecutor db) async {
+    final rows = await db.query(
+      'rentals',
+      where: 'is_deleted = 0 AND is_placeholder = 0 AND rental_no IS NOT NULL',
+      orderBy: 'rental_no DESC',
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
   Future<int> countWhere(DatabaseExecutor db, String where) async {
     final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM rentals WHERE $where');
     return rows.first['c'] as int? ?? 0;

@@ -68,6 +68,7 @@ Future<void> searchFor(
   // Older call sites name the category the way the previous layout
   // labelled its fields; map those onto the chips.
   final chip = switch (field) {
+    'All' => 'All',
     'Rental number' || 'Rental #' => 'Rental #',
     'Customer name' || 'Customer' => 'Customer',
     'Mobile number' || 'Mobile' => 'Mobile',

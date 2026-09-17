@@ -8,7 +8,6 @@ import '../widgets/sync_status_bar.dart';
 import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
 import '../widgets/pressable.dart';
-import '../widgets/rental_tile.dart';
 import '../widgets/showroom_scaffold.dart';
 import 'rental_detail_screen.dart';
 import 'rental_form_screen.dart';
@@ -49,13 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final services = AppScope.of(context);
     final db = services.db;
     return _Dashboard(
-      unclosed: await services.rentals.unclosed(db, limit: 5),
-      unclosedTotal: await services.rentals.countWhere(
-        db,
-        "is_deleted = 0 AND is_placeholder = 0 "
-        "AND LOWER(COALESCE(status, '')) != 'closed'",
-      ),
-      recent: await services.rentals.recent(db, limit: 5),
+      lastRental: await services.rentals.latestNumbered(db),
       insuranceDue: await services.vehicles.insuranceDue(db, withinDays: 60),
       awaitingFirstDownload:
           services.cloudSync != null && !await CloudSyncEngine.isHydrated(db),
@@ -141,7 +134,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return ShowroomScaffold(
       title: 'Burhan Rent-A-Car',
       actions: [
@@ -200,91 +192,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: _syncNow,
                       ),
                     ),
-                  _QuickNav(
+                  _Tiles(
+                    data: data,
                     onSearch: () => _shell(context)?.goToTab(1),
                     onLibrary: () => _shell(context)?.goToTab(2),
-                  ),
-                  const SizedBox(height: 16),
-                  if (data.notifications.isNotEmpty) ...[
-                    SectionCard(
-                      title: 'NEEDS ATTENTION',
-                      child: Column(
-                        children: [
-                          for (final note in data.notifications)
-                            _NotificationRow(
-                              note: note,
-                              onTap: note.isSyncPrompt
-                                  ? _syncNow
-                                  : note.isConflictPrompt
-                                      ? _openConflicts
-                                      : note.vehicle == null
-                                          ? null
-                                          : () async {
-                                              await Navigator.of(context).push(
-                                                MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      VehicleDetailScreen(
-                                                    vehicleId:
-                                                        note.vehicle!['id']
-                                                            as String,
-                                                  ),
-                                                ),
-                                              );
-                                              _reload();
-                                            },
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  SectionCard(
-                    title: 'ACTIVE / UNCLOSED RENTALS',
-                    action: Text(
-                      '${data.unclosedTotal}',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    child: data.unclosed.isEmpty
-                        ? const EmptyState(
-                            icon: Icons.check_circle_outline,
-                            message: 'No unclosed rentals.',
-                          )
-                        : Column(
-                            children: [
-                              for (final rental in data.unclosed)
-                                RentalTile(
-                                  rental: rental,
-                                  onTap: () => _openRental(rental),
-                                ),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(height: 16),
-                  SectionCard(
-                    title: 'RECENT RENTALS',
-                    child: data.recent.isEmpty
-                        ? EmptyState(
-                            icon: data.awaitingFirstDownload
-                                ? Icons.cloud_download_outlined
-                                : Icons.history,
-                            message: data.awaitingFirstDownload
-                                ? 'Downloading your records from the cloud… '
-                                    'If this takes long, check the internet '
-                                    'connection and tap Sync Now.'
-                                : 'No rentals recorded yet.',
-                          )
-                        : Column(
-                            children: [
-                              for (final rental in data.recent)
-                                RentalTile(
-                                  rental: rental,
-                                  onTap: () => _openRental(rental),
-                                ),
-                            ],
-                          ),
+                    onAttention: () => _showAttention(data),
+                    onLastRental: data.lastRental == null
+                        ? null
+                        : () => _openRental(data.lastRental!),
                   ),
                 ]),
               ),
@@ -293,6 +208,77 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ],
     );
+  }
+
+  /// The Needs Attention tile opens its items in a sheet. Each row closes
+  /// the sheet before acting so the action lands on the dashboard itself.
+  Future<void> _showAttention(_Dashboard data) async {
+    final notes = data.notifications;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) {
+        final theme = Theme.of(sheet);
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Needs Attention',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (notes.isEmpty)
+                  const EmptyState(
+                    icon: Icons.check_circle_outline,
+                    message: 'Nothing needs attention right now.',
+                  )
+                else
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final note in notes)
+                          _NotificationRow(
+                            note: note,
+                            onTap: _attentionAction(note) == null
+                                ? null
+                                : () {
+                                    Navigator.pop(sheet);
+                                    _attentionAction(note)!();
+                                  },
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  VoidCallback? _attentionAction(_Note note) {
+    if (note.isSyncPrompt) return _syncNow;
+    if (note.isConflictPrompt) return _openConflicts;
+    final vehicle = note.vehicle;
+    if (vehicle == null) return null;
+    return () async {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VehicleDetailScreen(
+            vehicleId: vehicle['id'] as String,
+          ),
+        ),
+      );
+      _reload();
+    };
   }
 
   Future<void> _openRental(Map<String, Object?> rental) async {
@@ -415,31 +401,74 @@ class _AccountMenuState extends State<_AccountMenu> {
   }
 }
 
-class _QuickNav extends StatelessWidget {
+/// The dashboard: four tiles, two per row. Search and Library jump to
+/// their tabs; Needs Attention and Last Rental carry a live figure so the
+/// owner sees at a glance what needs doing and which number they are on.
+class _Tiles extends StatelessWidget {
+  final _Dashboard data;
   final VoidCallback onSearch;
   final VoidCallback onLibrary;
+  final VoidCallback onAttention;
+  final VoidCallback? onLastRental;
 
-  const _QuickNav({required this.onSearch, required this.onLibrary});
+  const _Tiles({
+    required this.data,
+    required this.onSearch,
+    required this.onLibrary,
+    required this.onAttention,
+    required this.onLastRental,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final theme = Theme.of(context);
+    final notes = data.notifications;
+    final urgent = notes.any((n) => n.urgent);
+    final last = data.lastRental;
+    return Column(
       children: [
-        Expanded(
-          child: _NavCard(
+        _TileRow(
+          left: _NavCard(
             icon: Icons.search,
             label: 'Search',
             caption: 'Name, number, phone, CNIC',
             onTap: onSearch,
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _NavCard(
+          right: _NavCard(
             icon: Icons.directions_car,
             label: 'Library',
             caption: 'Vehicle inventory',
             onTap: onLibrary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _TileRow(
+          left: _NavCard(
+            icon: notes.isEmpty
+                ? Icons.check_circle_outline
+                : Icons.notifications_active_outlined,
+            tint: notes.isEmpty
+                ? null
+                : urgent
+                    ? theme.colorScheme.error
+                    : theme.colorScheme.tertiary,
+            label: 'Needs Attention',
+            value: notes.isEmpty ? null : '${notes.length}',
+            caption: data.attentionSummary,
+            onTap: onAttention,
+          ),
+          right: _NavCard(
+            icon: Icons.receipt_long,
+            label: 'Last Rental',
+            value: last == null ? '—' : '#${last['rental_no']}',
+            caption: last == null
+                ? (data.awaitingFirstDownload
+                    ? 'Downloading records…'
+                    : 'No rentals yet')
+                : [last['start_date'], last['status']]
+                    .where((v) => v != null)
+                    .join('  ·  '),
+            onTap: onLastRental,
           ),
         ),
       ],
@@ -447,22 +476,50 @@ class _QuickNav extends StatelessWidget {
   }
 }
 
+class _TileRow extends StatelessWidget {
+  final Widget left;
+  final Widget right;
+
+  const _TileRow({required this.left, required this.right});
+
+  @override
+  Widget build(BuildContext context) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: left),
+          const SizedBox(width: 12),
+          Expanded(child: right),
+        ],
+      ),
+    );
+  }
+}
+
 class _NavCard extends StatelessWidget {
   final IconData icon;
+  final Color? tint;
   final String label;
   final String caption;
-  final VoidCallback onTap;
+
+  /// A figure shown large beside the icon (a count, a rental number).
+  final String? value;
+  final VoidCallback? onTap;
 
   const _NavCard({
     required this.icon,
+    this.tint,
     required this.label,
     required this.caption,
+    this.value,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final color = tint ?? theme.colorScheme.primary;
     return Pressable(
       onTap: onTap,
       child: Card(
@@ -471,7 +528,22 @@ class _NavCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, color: theme.colorScheme.primary),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, color: color),
+                  const Spacer(),
+                  if (value != null)
+                    Text(
+                      value!,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(height: 10),
               Text(
                 label,
@@ -481,6 +553,8 @@ class _NavCard extends StatelessWidget {
               ),
               Text(
                 caption,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -544,23 +618,31 @@ class _Note {
 }
 
 class _Dashboard {
-  final List<Map<String, Object?>> unclosed;
-  final int unclosedTotal;
-  final List<Map<String, Object?>> recent;
+  /// The rental with the highest number -- "which number are we on".
+  final Map<String, Object?>? lastRental;
   final List<Map<String, Object?>> insuranceDue;
   final int pendingSync;
   final bool awaitingFirstDownload;
   final int conflicts;
 
   _Dashboard({
-    required this.unclosed,
-    required this.unclosedTotal,
-    required this.recent,
+    required this.lastRental,
     required this.insuranceDue,
     required this.pendingSync,
     this.awaitingFirstDownload = false,
     this.conflicts = 0,
   });
+
+  /// One line for the Needs Attention tile.
+  String get attentionSummary {
+    final parts = <String>[
+      if (insuranceDue.isNotEmpty)
+        'Insurance due${insuranceDue.length == 1 ? '' : ' ×${insuranceDue.length}'}',
+      if (pendingSync > 0) 'Changes to sync',
+      if (conflicts > 0) 'Overridden changes',
+    ];
+    return parts.isEmpty ? 'All clear' : parts.join('  ·  ');
+  }
 
   /// Only things the data can actually support: insurance dates that are
   /// due or overdue, and rentals still waiting for a backend number.
