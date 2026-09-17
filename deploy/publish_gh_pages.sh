@@ -21,6 +21,9 @@ cd "$WORKTREE"
 git checkout -q --orphan gh-pages
 git rm -rfq . >/dev/null 2>&1 || true
 cp -R "$ROOT/app/build/web/." .
+# The current Android build is served from the same site as a plain
+# download (the branch is rebuilt every publish, so it must be re-added).
+[ -f "$ROOT/Burhan-Rent-A-Car.apk" ] && cp "$ROOT/Burhan-Rent-A-Car.apk" .
 git add -A
 git -c user.name="$(git -C "$ROOT" config user.name)" \
     -c user.email="$(git -C "$ROOT" config user.email)" \
