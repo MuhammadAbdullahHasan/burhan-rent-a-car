@@ -19,6 +19,7 @@ import sqlite3
 import sys
 import urllib.error
 import urllib.request
+import uuid
 
 URL = "https://oxkebeulfbgcxfaattna.supabase.co"
 KEY = "sb_publishable_YVCUYvjXYsObRg6vZmxybQ_fdg6CpXZ"  # client-safe publishable key
@@ -92,6 +93,19 @@ def main():
     _, check = call("GET", "/rest/v1/rentals?select=rental_no&order=rental_no.desc&limit=1",
                     token=token)
     print(f"highest rental number on the server: #{check[0]['rental_no']}")
+
+    # A new generation makes every device let go of whatever copy it holds
+    # and download this dataset in full.
+    generation = str(uuid.uuid4())
+    _, existing_gen = call("GET", "/rest/v1/dataset_generation?select=owner_id", token=token)
+    if existing_gen:
+        call("PATCH", f"/rest/v1/dataset_generation?owner_id=eq.{existing_gen[0]['owner_id']}",
+             {"generation": generation, "updated_at": "now()"}, token=token,
+             prefer="return=minimal")
+    else:
+        call("POST", "/rest/v1/dataset_generation", {"generation": generation},
+             token=token, prefer="return=minimal")
+    print(f"dataset generation: {generation}")
 
 
 if __name__ == "__main__":

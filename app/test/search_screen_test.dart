@@ -1,10 +1,10 @@
 import 'dart:io';
 
 import 'package:burhan_rent_a_car/app_services.dart';
-import 'package:burhan_rent_a_car/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'helpers.dart' as helpers;
 import 'helpers.dart';
 
 /// One search bar; the selected chip decides which category the text
@@ -24,8 +24,7 @@ void main() {
   });
 
   Future<void> pumpSearch(WidgetTester t) async {
-    await t.pumpWidget(BurhanApp(services: services));
-    await settle(t);
+    await helpers.pumpApp(t, services);
     await goToTab(t, 'Search');
   }
 

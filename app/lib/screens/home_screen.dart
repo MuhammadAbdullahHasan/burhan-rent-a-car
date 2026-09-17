@@ -23,9 +23,85 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+/// Insurance is flagged this far ahead of its due date -- a month, so
+/// there is time to pay before it lapses.
+const _insuranceNoticeDays = 30;
+const _insuranceAlertKey = 'insurance_alert_on';
+
 class _HomeScreenState extends State<HomeScreen> {
   late Future<_Dashboard> _future;
   ValueNotifier<int>? _dataChanged;
+  bool _insuranceChecked = false;
+
+  /// Once a day, when the app is opened: the vehicles whose insurance is
+  /// due within the next month or already overdue, so it can be paid in
+  /// time. Tapping a vehicle opens it; "Later" brings it back tomorrow.
+  Future<void> _maybeAlertInsurance(List<Map<String, Object?>> due) async {
+    if (due.isEmpty || !mounted) return;
+    final db = AppScope.of(context).db;
+    final today = DateTime.now().toIso8601String().split('T').first;
+    final rows = await db.query(
+      'app_meta',
+      where: 'key = ?',
+      whereArgs: [_insuranceAlertKey],
+    );
+    if (rows.isNotEmpty && rows.first['value'] == today) return;
+    await db.insert(
+      'app_meta',
+      {'key': _insuranceAlertKey, 'value': today},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    if (!mounted) return;
+    final theme = Theme.of(context);
+    final now = DateTime.now();
+    await showDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        icon: Icon(Icons.shield_outlined, color: theme.colorScheme.error),
+        title: const Text('Insurance due'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final vehicle in due)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.directions_car),
+                title: Text(displayOrNA(vehicle['registration_no'])),
+                subtitle: Text(_insuranceLine(vehicle, now)),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () async {
+                  Navigator.pop(dialog);
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => VehicleDetailScreen(
+                        vehicleId: vehicle['id'] as String,
+                      ),
+                    ),
+                  );
+                  _reload();
+                },
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Later'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _insuranceLine(Map<String, Object?> vehicle, DateTime now) {
+    final raw = vehicle['insurance_due_on'] as String?;
+    final due = raw == null ? null : DateTime.tryParse(raw);
+    if (due == null) return 'Due ${displayOrNA(raw)}';
+    final days = due.difference(DateTime(now.year, now.month, now.day)).inDays;
+    if (days < 0) return 'Overdue since $raw';
+    if (days == 0) return 'Due today ($raw)';
+    return 'Due $raw  ·  in $days day${days == 1 ? '' : 's'}';
+  }
 
   @override
   void didChangeDependencies() {
@@ -47,9 +123,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<_Dashboard> _load() async {
     final services = AppScope.of(context);
     final db = services.db;
+    final insuranceDue = await services.vehicles.insuranceDue(
+      db,
+      withinDays: _insuranceNoticeDays,
+    );
+    if (!_insuranceChecked) {
+      _insuranceChecked = true;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _maybeAlertInsurance(insuranceDue),
+      );
+    }
     return _Dashboard(
       lastRental: await services.rentals.latestNumbered(db),
-      insuranceDue: await services.vehicles.insuranceDue(db, withinDays: 60),
+      insuranceDue: insuranceDue,
       awaitingFirstDownload:
           services.cloudSync != null && !await CloudSyncEngine.isHydrated(db),
       conflicts: (await db

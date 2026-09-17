@@ -266,3 +266,28 @@ alter function public.touch_synced_at() set search_path = public;
 -- RLS: every policy above uses (select auth.uid()) so it is evaluated once
 -- per statement instead of once per row.
 create index idx_audit_actor on audit_log(actor);
+
+-- ---------------------------------------------------------------------------
+-- Dataset generation: renewed whenever an owner's dataset is replaced
+-- wholesale (bulk load, reset). Devices compare it with the generation
+-- their local copy came from and re-download when it differs, so a stale
+-- device can never push old rows into a fresh dataset.
+-- ---------------------------------------------------------------------------
+create table dataset_generation (
+  owner_id    uuid primary key default auth.uid() references auth.users(id) on delete cascade,
+  generation  uuid not null default gen_random_uuid(),
+  updated_at  timestamptz not null default now()
+);
+alter table dataset_generation enable row level security;
+create policy "owner reads own generation"  on dataset_generation for select using (owner_id = (select auth.uid()));
+create policy "owner starts own generation" on dataset_generation for insert with check (owner_id = (select auth.uid()));
+create policy "owner renews own generation" on dataset_generation for update using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
+
+-- ---------------------------------------------------------------------------
+-- Defence in depth: nothing in this schema is reachable without signing
+-- in, so the anonymous role gets no table access at all (RLS already
+-- returns nothing to it; this removes the surface entirely).
+-- ---------------------------------------------------------------------------
+revoke all on all tables in schema public from anon;
+revoke all on all sequences in schema public from anon;
+revoke all on all functions in schema public from anon;

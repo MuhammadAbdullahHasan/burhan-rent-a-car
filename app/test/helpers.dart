@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:burhan_rent_a_car/app_services.dart';
+import 'package:burhan_rent_a_car/main.dart';
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,6 +40,22 @@ Future<void> settle(WidgetTester tester, {int rounds = 8}) async {
 Future<void> tapAndSettle(WidgetTester tester, Finder finder) async {
   await tester.tap(finder);
   await settle(tester);
+}
+
+/// Starts the app on a fresh database. The test data has a vehicle whose
+/// insurance is due within the month, so Home greets the first launch of
+/// the day with the insurance alert; that is put off so the test can get
+/// at the screen underneath. Pass [keepInsuranceAlert] to test the alert.
+Future<void> pumpApp(
+  WidgetTester tester,
+  AppServices services, {
+  bool keepInsuranceAlert = false,
+}) async {
+  await tester.pumpWidget(BurhanApp(services: services));
+  await settle(tester);
+  if (keepInsuranceAlert) return;
+  final later = find.widgetWithText(TextButton, 'Later');
+  if (later.evaluate().isNotEmpty) await tapAndSettle(tester, later);
 }
 
 /// "Search" and "Library" also appear as quick-nav card labels on Home, so

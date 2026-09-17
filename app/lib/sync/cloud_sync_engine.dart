@@ -33,6 +33,7 @@ class SyncSummary {
 }
 
 const _hydratedKey = 'cloud_hydrated';
+const _generationKey = 'cloud_generation';
 const _watermarkPrefix = 'cloud_wm_';
 const _epoch = '1970-01-01T00:00:00.000Z';
 const _pageSize = 500;
@@ -173,6 +174,11 @@ class CloudSyncEngine {
   }
 
   Future<SyncSummary> _run() async {
+    try {
+      await _adoptGeneration();
+    } catch (e) {
+      return SyncSummary(pushed: 0, pulled: 0, error: e.toString());
+    }
     if (!await isHydrated(db)) {
       try {
         await _hydrate();
@@ -986,6 +992,70 @@ class CloudSyncEngine {
     'rentals',
     'attachments'
   ];
+
+  // ---- dataset generation ----------------------------------------------------
+
+  /// The cloud stamps each owner's dataset with a generation id, renewed
+  /// whenever the dataset is replaced wholesale (a bulk load, a reset).
+  /// A device whose local copy belongs to another generation -- or came
+  /// from another account or another project -- lets that copy go and
+  /// downloads the current dataset, so no device can ever push stale rows
+  /// into a fresh one. A device meeting its first generation adopts it and
+  /// hydrates as usual, merging anything it already holds.
+  Future<void> _adoptGeneration() async {
+    final rows = await client.from('dataset_generation').select('generation');
+    String remote;
+    if (rows.isEmpty) {
+      final inserted = await client
+          .from('dataset_generation')
+          .insert(<String, Object?>{})
+          .select('generation')
+          .single();
+      remote = inserted['generation'] as String;
+    } else {
+      remote = rows.first['generation'] as String;
+    }
+    final local = await _meta(_generationKey);
+    if (local == remote) return;
+    if (local != null || await isHydrated(db)) {
+      await _releaseLocalDataset();
+    }
+    await _setMeta(_generationKey, remote);
+  }
+
+  /// Empties the synced tables, the outbox, conflict records and the sync
+  /// bookkeeping, leaving device-only preferences (recent searches, the
+  /// biometric switch) alone. The next pass hydrates from scratch.
+  Future<void> _releaseLocalDataset() async {
+    await db.transaction((txn) async {
+      for (final table in [
+        'sync_queue',
+        'sync_conflicts',
+        'attachments',
+        'rentals',
+        'customers',
+        'vehicles',
+      ]) {
+        await txn.delete(table);
+      }
+      await txn.delete(
+        'app_meta',
+        where: 'key = ? OR key LIKE ?',
+        whereArgs: [_hydratedKey, '$_watermarkPrefix%'],
+      );
+    });
+  }
+
+  Future<String?> _meta(String key) async {
+    final rows = await db.query('app_meta', where: 'key = ?', whereArgs: [key]);
+    return rows.isEmpty ? null : rows.first['value'] as String?;
+  }
+
+  Future<void> _setMeta(String key, String value) => db.insert(
+        'app_meta',
+        {'key': key, 'value': value},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
 
   Future<String> _watermark(String table) async {
     final rows = await db.query(

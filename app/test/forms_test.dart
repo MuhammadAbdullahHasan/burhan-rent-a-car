@@ -1,11 +1,11 @@
 import 'dart:io';
 
 import 'package:burhan_rent_a_car/app_services.dart';
-import 'package:burhan_rent_a_car/main.dart';
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'helpers.dart' as helpers;
 import 'helpers.dart';
 
 /// Form-level behaviour: validation, read-only rental numbers, Pending #,
@@ -24,10 +24,7 @@ void main() {
     await tempDir.delete(recursive: true);
   });
 
-  Future<void> pumpApp(WidgetTester tester) async {
-    await tester.pumpWidget(BurhanApp(services: services));
-    await settle(tester);
-  }
+  Future<void> pumpApp(WidgetTester tester) => helpers.pumpApp(tester, services);
 
   Future<void> openNewRentalForm(WidgetTester t) async {
     await pumpApp(t);

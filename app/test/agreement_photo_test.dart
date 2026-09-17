@@ -2,13 +2,13 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:burhan_rent_a_car/app_services.dart';
-import 'package:burhan_rent_a_car/main.dart';
 import 'package:burhan_rent_a_car/services/agreement_photo.dart';
 import 'package:burhan_rent_a_car/widgets/rental_tile.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 
+import 'helpers.dart' as helpers;
 import 'helpers.dart';
 
 /// A real, decodable JPEG so Image.memory renders in tests.
@@ -60,10 +60,7 @@ void main() {
       await tempDir.delete(recursive: true);
     });
 
-    Future<void> pumpApp(WidgetTester t) async {
-      await t.pumpWidget(BurhanApp(services: services));
-      await settle(t);
-    }
+    Future<void> pumpApp(WidgetTester t) => helpers.pumpApp(t, services);
 
     Future<String> rentalId(int no) async =>
         (await services.rentals.findByRentalNo(services.db, no))!['id'] as String;

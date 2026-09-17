@@ -62,10 +62,22 @@ class FakePostgrest {
         .toIso8601String();
   }
 
+  /// The owner's dataset generation; null until a device creates it.
+  String? generation;
+
   Future<http.Response> _handle(http.Request request) async {
     final segments = request.url.pathSegments; // rest, v1, <table>|rpc, ...
     final q = request.url.queryParameters;
     requests.add('${request.method} ${request.url.path}');
+    if (segments[2] == 'dataset_generation') {
+      if (request.method == 'POST') {
+        generation ??= 'gen-${_stamp()}';
+        return _json({'generation': generation}); // insert(...).single()
+      }
+      return _json([
+        if (generation != null) {'generation': generation},
+      ]);
+    }
     if (segments[2] == 'rpc') {
       final max = tables['rentals']!
           .values
@@ -268,6 +280,43 @@ void main() {
     final again = await engineFor(db).syncNow();
     expect(again.changedAnything, isFalse);
     expect(again.hasError, isFalse);
+    await db.close();
+  });
+
+  test('a replaced cloud dataset is taken over in full, stale rows and all',
+      () async {
+    final db = await openAppDatabase(
+      databaseFactoryFfi,
+      p.join(dir.path, 'phone.db'),
+    );
+    expect((await engineFor(db).syncNow()).error, isNull);
+    expect(await _count(db, 'rentals'), 60);
+
+    // Work done here after that sync, still in the outbox.
+    await LocalSyncEngine().createPendingRental(
+      db,
+      startDate: '2026-09-20',
+      status: 'Open',
+    );
+    expect(await _count(db, 'sync_queue', "status = 'pending'"), 1);
+
+    // The owner reloads the whole dataset: a new generation, one rental.
+    final keep = server.tables['rentals']!.values.first;
+    server.tables['rentals']!
+      ..clear()
+      ..[keep['id'] as String] = keep;
+    server.generation = 'gen-reloaded';
+
+    final after = await engineFor(db).syncNow();
+    expect(after.error, isNull);
+    expect(await _count(db, 'rentals'), 1);
+    expect(await _count(db, 'sync_queue', "status = 'pending'"), 0);
+    expect(server.tables['rentals']!.length, 1,
+        reason: 'nothing from the old copy may reach the new dataset');
+
+    // Same generation again: an ordinary incremental sync.
+    final again = await engineFor(db).syncNow();
+    expect(again.changedAnything, isFalse);
     await db.close();
   });
 

@@ -1,13 +1,13 @@
 import 'dart:io';
 
 import 'package:burhan_rent_a_car/app_services.dart';
-import 'package:burhan_rent_a_car/main.dart';
 import 'package:burhan_rent_a_car/screens/library_screen.dart';
 import 'package:burhan_rent_a_car/screens/search_screen.dart';
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'helpers.dart' as helpers;
 import 'helpers.dart';
 
 void main() {
@@ -24,10 +24,7 @@ void main() {
     await tempDir.delete(recursive: true);
   });
 
-  Future<void> pumpApp(WidgetTester tester) async {
-    await tester.pumpWidget(BurhanApp(services: services));
-    await settle(tester);
-  }
+  Future<void> pumpApp(WidgetTester tester) => helpers.pumpApp(tester, services);
 
   testWidgets('home shows four tiles and the last rental number', (t) async {
     await pumpApp(t);
@@ -51,6 +48,26 @@ void main() {
         findsOneWidget,
       );
     }
+  });
+
+  testWidgets('insurance due within a month is announced once a day',
+      (t) async {
+    // KHI-654's insurance is due 2026-09-30 in the test data; the other
+    // two vehicles are due in November and December.
+    await helpers.pumpApp(t, services, keepInsuranceAlert: true);
+    final alert = find.widgetWithText(AlertDialog, 'Insurance due');
+    expect(alert, findsOneWidget);
+    expect(find.text('KHI-654'), findsOneWidget);
+    expect(find.text('KHI-123'), findsNothing);
+    await tapAndSettle(t, find.text('Later'));
+    expect(alert, findsNothing);
+
+    // Opening the app again the same day stays quiet...
+    await t.pumpWidget(const SizedBox());
+    await helpers.pumpApp(t, services, keepInsuranceAlert: true);
+    expect(alert, findsNothing);
+    // ...but the Needs Attention tile still carries it.
+    expect(find.textContaining('Insurance due'), findsOneWidget);
   });
 
   testWidgets('the Last Rental tile opens that rental', (t) async {
