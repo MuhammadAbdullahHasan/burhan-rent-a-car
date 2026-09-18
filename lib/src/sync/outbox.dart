@@ -70,6 +70,41 @@ class Outbox {
     );
   }
 
+  /// Every waiting change with what the owner needs to judge it: what it
+  /// is, how many times it has been tried and the last error the server or
+  /// the network gave. Oldest first, like [pending].
+  Future<List<Map<String, Object?>>> pendingDetails(DatabaseExecutor db) {
+    return db.rawQuery('''
+      SELECT q.id, q.entity_type, q.entity_id, q.operation, q.retry_count,
+             q.last_error, q.created_at,
+             r.rental_no, r.is_placeholder,
+             c.full_name AS customer_name,
+             v.registration_no AS vehicle_registration,
+             ar.rental_no AS attachment_rental_no
+      FROM sync_queue q
+      LEFT JOIN rentals r ON q.entity_type = 'rental' AND r.id = q.entity_id
+      LEFT JOIN customers c ON q.entity_type = 'customer' AND c.id = q.entity_id
+      LEFT JOIN vehicles v ON q.entity_type = 'vehicle' AND v.id = q.entity_id
+      LEFT JOIN attachments a ON q.entity_type = 'attachment' AND a.id = q.entity_id
+      LEFT JOIN rentals ar ON ar.id = a.entity_id
+      WHERE q.status = 'pending'
+      ORDER BY q.created_at ASC, q.rowid ASC
+    ''');
+  }
+
+  /// Gives up on one waiting change: the local row keeps whatever the owner
+  /// typed, but it will no longer be sent, and the next pull brings the
+  /// cloud's version back over it. For a change the server rejects every
+  /// time -- the owner's explicit call, never automatic.
+  Future<void> discard(DatabaseExecutor db, String id) {
+    return db.update(
+      'sync_queue',
+      {'status': 'discarded'},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<void> markDone(DatabaseExecutor db, String id) {
     return db.update(
       'sync_queue',

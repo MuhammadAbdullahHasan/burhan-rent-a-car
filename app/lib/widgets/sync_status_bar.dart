@@ -8,7 +8,16 @@ class SyncStatusBar extends StatelessWidget {
   final ValueNotifier<SyncStatus> status;
   final VoidCallback onTap;
 
-  const SyncStatusBar({super.key, required this.status, required this.onTap});
+  /// Opens the details when the bar reports a problem; a plain tap still
+  /// just retries when everything is fine.
+  final VoidCallback? onProblem;
+
+  const SyncStatusBar({
+    super.key,
+    required this.status,
+    required this.onTap,
+    this.onProblem,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +27,9 @@ class SyncStatusBar extends StatelessWidget {
       builder: (context, s, _) {
         final (icon, text, color) = _describe(s, theme);
         return InkWell(
-          onTap: onTap,
+          onTap: s.phase == SyncPhase.error && onProblem != null
+              ? onProblem
+              : onTap,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),

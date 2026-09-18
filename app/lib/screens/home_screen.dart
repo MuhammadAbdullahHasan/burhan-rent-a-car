@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../app_services.dart';
 import '../sync/cloud_sync_engine.dart';
 import '../sync/sync_actions.dart';
+import '../widgets/sync_problems_sheet.dart';
 import '../widgets/sync_status_bar.dart';
 import '../auth/biometric_service.dart';
 import '../widgets/common.dart';
@@ -282,6 +283,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: SyncStatusBar(
                         status: AppScope.of(context).syncStatus,
                         onTap: _syncNow,
+                        onProblem: () => showSyncProblemsSheet(context),
                       ),
                     ),
                   _Tiles(

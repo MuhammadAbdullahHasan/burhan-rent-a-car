@@ -12,6 +12,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// its own shows its archive scan, fetched here on demand and cached on
 /// the device so it opens offline next time. Rentals without a scan get
 /// nothing -- there is no placeholder image.
+enum _Fetch { missing, offline }
+
 class AgreementArchive {
   final SupabaseClient client;
   static const _bucket = 'agreements';
@@ -37,45 +39,55 @@ class AgreementArchive {
     if (fromDisk.isNotEmpty) return _memory[rentalNo] = fromDisk;
 
     if (client.auth.currentUser == null) return const [];
-    final List<FileObject> objects;
-    try {
-      objects = await client.storage.from(_bucket).list(
-            path: _folder,
-            searchOptions: SearchOptions(search: '$rentalNo', limit: 20),
-          );
-    } catch (_) {
-      return const []; // offline or bucket unreachable: nothing to show
-    }
-    final pattern = RegExp('^$rentalNo(-\\d+)?\\.jpg\$');
-    final names = objects.map((o) => o.name).where(pattern.hasMatch).toList()
-      ..sort((a, b) => a.length != b.length
-          ? a.length - b.length // "96.jpg" before "96-2.jpg"
-          : a.compareTo(b));
-    if (names.isEmpty) {
+    final photos = <Uint8List>[];
+    // The first scan is fetched by its exact name: a name search would rank
+    // "1005.jpg" ahead of "5.jpg" and cap at a page, so short numbers would
+    // come back empty. Further scans (rare) are "<no>-2.jpg", "-3" ...
+    final first = await _fetch('$rentalNo.jpg');
+    if (first == _Fetch.offline) return const [];
+    if (first == _Fetch.missing) {
       _absent.add(rentalNo);
       return const [];
     }
-    final photos = <Uint8List>[];
-    for (final name in names) {
-      try {
-        final bytes =
-            await client.storage.from(_bucket).download('$_folder/$name');
-        photos.add(bytes);
-        await _writeDisk(name, bytes);
-      } catch (_) {
-        // A scan that fails to download is simply not shown this time.
-      }
+    photos.add(first as Uint8List);
+    for (var i = 2; i <= 9; i++) {
+      final more = await _fetch('$rentalNo-$i.jpg');
+      if (more is! Uint8List) break;
+      photos.add(more);
     }
-    if (photos.isEmpty) return const [];
     return _memory[rentalNo] = photos;
+  }
+
+  /// The bytes of one object, [_Fetch.missing] when the bucket has no such
+  /// name, [_Fetch.offline] when the request could not be made at all.
+  Future<Object> _fetch(String name) async {
+    try {
+      final bytes =
+          await client.storage.from(_bucket).download('$_folder/$name');
+      await _writeDisk(name, bytes);
+      return bytes;
+    } on StorageException catch (e) {
+      final code = e.statusCode ?? '';
+      final text = e.message.toLowerCase();
+      if (code == '404' || code == '400' || text.contains('not found')) {
+        return _Fetch.missing;
+      }
+      return _Fetch.offline;
+    } catch (_) {
+      return _Fetch.offline;
+    }
   }
 
   Future<Directory?> _cacheDir() async {
     if (kIsWeb) return null;
-    final base = await getApplicationSupportDirectory();
-    final dir = Directory(p.join(base.path, 'agreement_archive', _folder));
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    return dir;
+    try {
+      final base = await getApplicationSupportDirectory();
+      final dir = Directory(p.join(base.path, 'agreement_archive', _folder));
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      return dir;
+    } catch (_) {
+      return null; // no writable app directory: work from memory only
+    }
   }
 
   Future<List<Uint8List>> _readDisk(int rentalNo) async {
