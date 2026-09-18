@@ -487,18 +487,18 @@ class CloudSyncEngine {
 
   Future<int> _pull() async {
     final pulled = await _pullAll();
-    return pulled.values.fold<int>(0, (sum, ids) => sum + ids.length);
+    return pulled.values.fold<int>(0, (sum, r) => sum + r.written.length);
   }
 
-  /// Pulls every table from its own watermark; returns the ids applied.
-  Future<Map<String, Set<String>>> _pullAll() async {
+  /// Pulls every table from its own watermark.
+  Future<Map<String, _PullResult>> _pullAll() async {
     return {
       for (final table in _syncedTables)
         table: await _pullTable(table, await _pendingIdsFor(_typeOf(table))),
     };
   }
 
-  Future<Set<String>> _pullTable(String table, Set<String> skipIds) async {
+  Future<_PullResult> _pullTable(String table, Set<String> skipIds) async {
     final watermark = await _watermark(table);
     final since = watermark == _epoch
         ? _epoch
@@ -507,7 +507,17 @@ class CloudSyncEngine {
             .subtract(_overlap)
             .toIso8601String();
 
-    final applied = <String>{};
+    // `written`: rows this pass actually inserted/replaced -- what the
+    // owner-facing summary ("N received") and changedAnything should count.
+    // `confirmed`: written, PLUS rows already identical locally (skipped as
+    // a no-op write, but still a real, current cloud row -- not a leftover
+    // to be cleaned up). Hydrate's post-pull cleanup needs `confirmed`: a
+    // resumed hydrate (the first attempt was interrupted, e.g. the app was
+    // closed mid-download) must not drop rows the interrupted attempt
+    // already saved correctly just because this pass had no reason to
+    // rewrite them.
+    final written = <String>{};
+    final confirmed = <String>{};
     var newest = watermark;
     var offset = 0;
     while (true) {
@@ -523,15 +533,19 @@ class CloudSyncEngine {
         final stamp = row['synced_at'] as String;
         if (_isLater(stamp, newest)) newest = stamp;
         if (skipIds.contains(id)) continue; // has an unpushed local change
-        if (await _alreadyLocal(table, row)) continue; // overlap re-read
+        if (await _alreadyLocal(table, row)) {
+          confirmed.add(id);
+          continue; // overlap re-read; already correct, nothing to write
+        }
         await _apply(table, row);
-        applied.add(id);
+        written.add(id);
+        confirmed.add(id);
       }
       if (rows.length < _pageSize) break;
       offset += rows.length;
     }
     if (newest != watermark) await _setWatermark(table, newest);
-    return applied;
+    return _PullResult(written, confirmed);
   }
 
   /// The overlap window re-reads rows this device already holds; an
@@ -749,7 +763,7 @@ class CloudSyncEngine {
       final mapped = twin[table]![id];
       if (mapped != null) return mapped;
       final row = before[table]![id];
-      return row == null ? null : _match(table, row, pulled[table]!);
+      return row == null ? null : _match(table, row, pulled[table]!.confirmed);
     }
 
     /// Null when the referenced row exists nowhere any more: the link is
@@ -769,7 +783,7 @@ class CloudSyncEngine {
       for (final id in touched[type]!.difference(created[type]!)) {
         final row = before[table]![id];
         if (row == null) continue;
-        final target = await _match(table, row, pulled[table]!);
+        final target = await _match(table, row, pulled[table]!.confirmed);
         if (target == null) {
           keep[table]!.add(id);
           continue;
@@ -805,7 +819,8 @@ class CloudSyncEngine {
       final row = await _rowById('rentals', id);
       if (row == null) continue;
       final updates = <String, Object?>{};
-      if (!pulled['rentals']!.contains(id) && row['rental_no'] != null) {
+      if (!pulled['rentals']!.confirmed.contains(id) &&
+          row['rental_no'] != null) {
         updates['rental_no'] = null;
       }
       for (final (column, parent) in _rentalParents) {
@@ -837,7 +852,7 @@ class CloudSyncEngine {
 
     // 4. Drop the device's private seeded copies that now have a cloud twin.
     for (final table in _tables) {
-      await _dropExcept(table, {...pulled[table]!, ...keep[table]!});
+      await _dropExcept(table, {...pulled[table]!.confirmed, ...keep[table]!});
     }
 
     // 5. Re-queue in dependency order so parents reach the server first.
@@ -1227,6 +1242,14 @@ class _PushResult {
     this.firstError,
     this.notices,
   );
+}
+
+/// See the doc comment on [CloudSyncEngine._pullTable] for what each set
+/// means and why they must stay separate.
+class _PullResult {
+  final Set<String> written;
+  final Set<String> confirmed;
+  _PullResult(this.written, this.confirmed);
 }
 
 bool _asBool(Object? sqliteInt) => sqliteInt == 1;

@@ -31,6 +31,11 @@ class FakePostgrest {
   bool failAttachments = false;
   int floor = 60;
 
+  /// Simulates a dropped connection partway through a pull: a GET on this
+  /// table fails every time until cleared, as if the device lost signal
+  /// mid-download. Other tables' GETs are unaffected.
+  String? failPullTable;
+
   http.Client client() => MockClient((request) async {
         final response = await _handle(request);
         // postgrest reads response.request, which a bare Response lacks.
@@ -90,6 +95,10 @@ class FakePostgrest {
     final table = tables[name]!;
 
     if (request.method == 'GET') {
+      if (name == failPullTable) {
+        return _json({'code': '500', 'message': 'connection dropped'},
+            status: 500);
+      }
       var rows = table.values.toList();
       final byId = q['id'];
       if (byId != null) {
@@ -280,6 +289,50 @@ void main() {
     final again = await engineFor(db).syncNow();
     expect(again.changedAnything, isFalse);
     expect(again.hasError, isFalse);
+    await db.close();
+  });
+
+  test(
+      'a hydrate interrupted partway does not lose the tables that already '
+      'finished, once the connection comes back', () async {
+    final db = await openAppDatabase(
+      databaseFactoryFfi,
+      p.join(dir.path, 'interrupted.db'),
+    );
+    final engine = engineFor(db);
+
+    // The device's very first sync gets as far as customers and vehicles,
+    // then loses signal while pulling rentals -- exactly what a multi-
+    // thousand-row first download over a shaky mobile connection looks
+    // like. The pass fails, so the "hydrated" flag is never written.
+    server.failPullTable = 'rentals';
+    final first = await engine.syncNow();
+    expect(first.hasError, isTrue);
+    expect(await CloudSyncEngine.isHydrated(db), isFalse);
+    expect(await _count(db, 'customers'), 10,
+        reason: 'customers finished before the connection dropped');
+    expect(await _count(db, 'vehicles'), 3,
+        reason: 'vehicles finished before the connection dropped');
+
+    // The owner reopens the app a while later. In between, one vehicle
+    // (only) picks up a real edit elsewhere -- e.g. its insurance date is
+    // updated from another device -- so its synced_at jumps far ahead of
+    // the other two, which are untouched since the failed attempt.
+    final touchedVehicle = server.tables['vehicles']!.values.first;
+    touchedVehicle['synced_at'] =
+        DateTime.utc(2026, 9, 16, 13, 0, 0).toIso8601String();
+
+    server.failPullTable = null;
+    final retry = await engine.syncNow();
+    expect(retry.hasError, isFalse);
+    expect(await CloudSyncEngine.isHydrated(db), isTrue);
+    expect(await _count(db, 'customers'), 10,
+        reason: 'unchanged customers must survive the retry');
+    expect(await _count(db, 'vehicles'), 3,
+        reason: 'the two untouched vehicles must survive alongside the one '
+            'that legitimately changed -- not be deleted just because the '
+            'retry had no reason to rewrite them');
+    expect(await _count(db, 'rentals'), 60);
     await db.close();
   });
 
