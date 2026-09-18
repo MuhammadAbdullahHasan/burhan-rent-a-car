@@ -96,7 +96,8 @@ void main() {
       expect(rental.subtitle, noPreviousRecordAvailable);
     });
 
-    test('soleExactMatch drives submit-to-open only when unambiguous', () async {
+    test('soleExactMatch drives submit-to-open only when unambiguous',
+        () async {
       final unambiguous = await search.search(db, 'KHI-789');
       expect(search.soleExactMatch(unambiguous), isNotNull);
 
@@ -107,7 +108,6 @@ void main() {
     test('empty query returns nothing', () async {
       expect(await search.search(db, '   '), isEmpty);
     });
-
   });
 
   group('scoped search: one category per field', () {
@@ -120,6 +120,33 @@ void main() {
       expect(none, isEmpty);
     });
 
+    test(
+        'reference field finds every rental the reference vouched for, '
+        'by name or by number', () async {
+      final byName =
+          await search.searchScoped(db, 'ali r', SearchScope.reference);
+      expect(byName, hasLength(14));
+      expect(byName.every((r) => r.type == SearchResultType.rental), isTrue);
+      expect(byName.every((r) => r.matchedOn == 'Reference'), isTrue);
+      expect(byName.first.subtitle, startsWith('Ref: Ali R.'));
+      // Newest first, so the owner sees the latest agreement at the top.
+      expect(byName.first.title, 'Rental #58');
+
+      final byNumber =
+          await search.searchScoped(db, '0300-999 0001', SearchScope.reference);
+      expect(
+          byNumber.map((r) => r.id).toSet(), byName.map((r) => r.id).toSet());
+
+      // A short digit run isn't enough to match a contact; only names.
+      final none = await search.searchScoped(db, '99', SearchScope.reference);
+      expect(none, isEmpty);
+    });
+
+    test('the All box also finds rentals by their reference', () async {
+      final results = await search.search(db, 'Noman S');
+      expect(results.where((r) => r.matchedOn == 'Reference'), isNotEmpty);
+    });
+
     test('name field never returns rentals or vehicles', () async {
       final results =
           await search.searchScoped(db, 'Khan', SearchScope.customerName);
@@ -130,11 +157,13 @@ void main() {
 
     test('mobile field: exact match ranks first, partial digits still match',
         () async {
-      final exact = await search.searchScoped(db, '03001234567', SearchScope.phone);
+      final exact =
+          await search.searchScoped(db, '03001234567', SearchScope.phone);
       expect(exact.first.isExactMatch, isTrue);
       expect(exact.first.title, 'Billa Khan');
 
-      final partial = await search.searchScoped(db, '1234567', SearchScope.phone);
+      final partial =
+          await search.searchScoped(db, '1234567', SearchScope.phone);
       expect(partial.length, greaterThan(1));
       expect(partial.every((r) => r.type == SearchResultType.customer), isTrue);
       // A digit string is not treated as a rental number in this field.
@@ -150,7 +179,8 @@ void main() {
     });
 
     test('vehicle field ignores separators and case', () async {
-      final results = await search.searchScoped(db, 'khi 123', SearchScope.vehicle);
+      final results =
+          await search.searchScoped(db, 'khi 123', SearchScope.vehicle);
       expect(results.first.title, 'KHI-123');
       expect(results.first.isExactMatch, isTrue);
       expect(results.every((r) => r.type == SearchResultType.vehicle), isTrue);

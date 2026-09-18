@@ -7,7 +7,7 @@ enum SearchResultType { rental, customer, vehicle }
 /// Which field a scoped search runs against. Each maps to exactly one of
 /// the lookups below, so a category field only ever returns that kind of
 /// match.
-enum SearchScope { rentalNo, customerName, phone, cnic, vehicle }
+enum SearchScope { rentalNo, customerName, phone, cnic, vehicle, reference }
 
 /// One row in the result list the user sees.
 class SearchResult {
@@ -47,7 +47,8 @@ class UniversalSearchService {
   /// to render thousands of rows; exact matches are never capped away.
   static const int partialLimit = 50;
 
-  Future<List<SearchResult>> search(DatabaseExecutor db, String rawQuery) async {
+  Future<List<SearchResult>> search(
+      DatabaseExecutor db, String rawQuery) async {
     final query = rawQuery.trim();
     if (query.isEmpty) return const [];
 
@@ -70,6 +71,7 @@ class UniversalSearchService {
     addAll(await _byPhone(db, query));
     addAll(await _byCnic(db, query));
     addAll(await _byVehicle(db, query));
+    addAll(await _byReference(db, query));
     return results;
   }
 
@@ -86,6 +88,7 @@ class UniversalSearchService {
       SearchScope.phone => _byPhone(db, query),
       SearchScope.cnic => _byCnic(db, query),
       SearchScope.vehicle => _byVehicle(db, query),
+      SearchScope.reference => _byReference(db, query),
     };
   }
 
@@ -99,7 +102,8 @@ class UniversalSearchService {
   // ---- one lookup per category -------------------------------------------
 
   /// Exact rental number only -- "exact rental number returns that rental".
-  Future<List<SearchResult>> _byRentalNo(DatabaseExecutor db, String query) async {
+  Future<List<SearchResult>> _byRentalNo(
+      DatabaseExecutor db, String query) async {
     final asInt = int.tryParse(query);
     if (asInt == null) return const [];
     final rows = await db.query(
@@ -175,7 +179,8 @@ class UniversalSearchService {
   }
 
   /// Exact normalized registration first, then partial.
-  Future<List<SearchResult>> _byVehicle(DatabaseExecutor db, String query) async {
+  Future<List<SearchResult>> _byVehicle(
+      DatabaseExecutor db, String query) async {
     final regNorm = normalizeRegistration(query);
     if (regNorm == null) return const [];
     final results = <SearchResult>[];
@@ -189,7 +194,8 @@ class UniversalSearchService {
     );
     for (final row in exact) {
       seen.add(row['id'] as String);
-      results.add(_vehicleResult(row, isExact: true, matchedOn: 'Registration'));
+      results
+          .add(_vehicleResult(row, isExact: true, matchedOn: 'Registration'));
     }
 
     final partial = await db.query(
@@ -206,6 +212,43 @@ class UniversalSearchService {
       }
     }
     return results;
+  }
+
+  /// Rentals by the person who vouched for the customer: the reference's
+  /// name, or their contact number with separators ignored. Every rental
+  /// they stood behind comes back, newest first, with their name in the
+  /// subtitle so the owner sees why it matched.
+  Future<List<SearchResult>> _byReference(
+    DatabaseExecutor db,
+    String query,
+  ) async {
+    final digits = normalizeDigits(query);
+    final byDigits = digits != null && digits.length >= 3;
+    const contactDigits =
+        "REPLACE(REPLACE(REPLACE(ref_contact, '-', ''), ' ', ''), '+', '')";
+    final rows = await db.query(
+      'rentals',
+      where: 'is_deleted = 0 AND is_placeholder = 0 AND '
+          '(ref_name LIKE ? COLLATE NOCASE'
+          '${byDigits ? ' OR $contactDigits LIKE ?' : ''})',
+      whereArgs: ['%$query%', if (byDigits) '%$digits%'],
+      orderBy: 'rental_no DESC',
+      limit: partialLimit,
+    );
+    return [
+      for (final row in rows)
+        SearchResult(
+          type: SearchResultType.rental,
+          id: row['id'] as String,
+          title: 'Rental #${row['rental_no']}',
+          subtitle: [
+            'Ref: ${row['ref_name'] ?? row['ref_contact']}',
+            row['start_date'],
+          ].where((v) => v != null).join('  ·  '),
+          isExactMatch: false,
+          matchedOn: 'Reference',
+        ),
+    ];
   }
 
   // ---- row -> result -------------------------------------------------------
@@ -239,9 +282,8 @@ class UniversalSearchService {
       type: SearchResultType.customer,
       id: row['id'] as String,
       title: (row['full_name'] as String?) ?? 'Unnamed customer',
-      subtitle: [row['phone'], row['cnic']]
-          .where((v) => v != null)
-          .join('  ·  '),
+      subtitle:
+          [row['phone'], row['cnic']].where((v) => v != null).join('  ·  '),
       isExactMatch: isExact,
       matchedOn: matchedOn,
     );

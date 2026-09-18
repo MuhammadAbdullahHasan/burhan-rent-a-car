@@ -37,7 +37,8 @@ void main() {
       'Customer',
       'Mobile',
       'CNIC',
-      'Vehicle Reg'
+      'Vehicle Reg',
+      'Reference',
     ]) {
       expect(
         find.descendant(of: find.byType(ChoiceChip), matching: find.text(chip)),
@@ -46,7 +47,7 @@ void main() {
     }
     expect(
       find.text('No Recent Searches\n'
-          'Type a name, rental number, mobile, CNIC or registration above'),
+          'Type a name, rental number, mobile, CNIC, registration or reference above'),
       findsOneWidget,
     );
   });

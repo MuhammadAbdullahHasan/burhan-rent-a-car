@@ -48,7 +48,7 @@ class SearchCategory {
   String get key => scope?.name ?? 'all';
 
   String get emptyHint => scope == null
-      ? 'Type a name, rental number, mobile, CNIC or registration above'
+      ? 'Type a name, rental number, mobile, CNIC, registration or reference above'
       : 'Enter a $noun above';
 
   String noMatch(String query) => scope == null
@@ -91,6 +91,12 @@ class SearchCategory {
       scope: SearchScope.vehicle,
       chip: 'Vehicle Reg',
       noun: 'vehicle registration',
+      keyboard: TextInputType.text,
+    ),
+    SearchCategory(
+      scope: SearchScope.reference,
+      chip: 'Reference',
+      noun: 'reference name or number',
       keyboard: TextInputType.text,
     ),
   ];
