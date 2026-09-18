@@ -6,6 +6,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_services.dart';
+import 'services/agreement_archive.dart';
 import 'auth/auth_service.dart';
 import 'auth/biometric_service.dart';
 import 'auth/email_link_landing.dart';
@@ -139,6 +140,8 @@ class _BurhanAppState extends State<BurhanApp> {
       client: Supabase.instance.client,
       db: services.db,
     );
+    services.agreementArchive =
+        AgreementArchive(client: Supabase.instance.client);
     engine.live.addListener(() {
       services.syncStatus.value =
           services.syncStatus.value.copyWith(live: engine.live.value);

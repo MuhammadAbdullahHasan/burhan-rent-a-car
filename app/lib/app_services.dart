@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' as sqflite;
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
+import 'services/agreement_archive.dart';
 
 /// Everything the UI needs from the validated data layer, assembled once.
 ///
@@ -42,6 +43,10 @@ class AppServices {
 
   /// Daily snapshots + manual restore; null without a cloud (tests).
   CloudBackup? cloudBackup;
+
+  /// The pre-app scanned agreements, fetched by rental number; null
+  /// without a cloud (tests).
+  AgreementArchive? agreementArchive;
 
   /// Bumped after any sync that changed local rows, so open screens can
   /// reload without the owner having to navigate away and back.

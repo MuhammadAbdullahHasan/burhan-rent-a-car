@@ -82,3 +82,25 @@ This is fine for a few hundred photos. For the archive it is not:
 
 Roughly two working days end to end, plus the archive upload itself
 (≈ 1–2 hours for 650 MB).
+
+## What was done on 2026-09-17/18 (interim, before the full redesign)
+
+The archive arrived as 7,138 files named by rental number. It is live for
+the client now, by the shortest path that keeps the target design intact:
+
+* Private bucket `agreements`, objects `<owner_id>/<rental_no>.jpg`,
+  owner-only storage policy (in `supabase_migration.sql`).
+* `deploy/prepare_agreement_photos.py` normalises the owner's folder
+  (numbering, identical copies, EXIF, 1200 px q70 on the free plan -- 790 MB
+  for 7,090 photos); `deploy/upload_agreement_photos.py` loads it, resumable,
+  with `--prune` / `--again` for later corrections.
+* The owner reviewed every duplicate and mislabelled file by hand; the
+  archive's "Blank"/"Cancelled" scans stay on their number and the rental's
+  remarks say so (`deploy/mark_agreement_forms.py`).
+* In the app, a rental with no photo of its own shows its archive scan
+  (`AgreementArchive`, fetched on demand, cached on the device). New photos
+  taken in the app still go inline with the rental, as before.
+
+Still to do from the target design: metadata-only attachments, upload-then-
+upsert for new photos, and (if the client moves photo hosting to their own
+web host) a gated download endpoint there with the app pointed at it.

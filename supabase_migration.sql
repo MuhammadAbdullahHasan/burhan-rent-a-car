@@ -291,3 +291,20 @@ create policy "owner renews own generation" on dataset_generation for update usi
 revoke all on all tables in schema public from anon;
 revoke all on all sequences in schema public from anon;
 revoke all on all functions in schema public from anon;
+
+-- ---------------------------------------------------------------------------
+-- Agreement photo archive (2026-09-17).
+-- ---------------------------------------------------------------------------
+-- The owner's scanned agreements, one object per rental number
+-- (`<owner_id>/<rental_no>.jpg`, a second photo of the same rental as
+-- `<rental_no>-2.jpg`), loaded once by deploy/upload_agreement_photos.py.
+-- Private: each owner sees only the folder named after their own user id,
+-- exactly like the backups bucket. The app fetches a rental's photo from
+-- here on demand when the rental has no photo of its own.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('agreements', 'agreements', false, 10485760, array['image/jpeg'])
+on conflict (id) do nothing;
+create policy "owner manages own agreements" on storage.objects
+  for all to authenticated
+  using (bucket_id = 'agreements' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'agreements' and (storage.foldername(name))[1] = auth.uid()::text);

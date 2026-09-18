@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../app_services.dart';
 import '../sync/sync_actions.dart';
+import '../services/agreement_archive.dart';
 import '../services/agreement_photo.dart';
 import '../widgets/agreement_card.dart';
 import '../widgets/common.dart';
@@ -42,6 +43,14 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
       db,
       widget.rentalId,
     );
+    // No photo of its own: show the scan from the owner's archive, if
+    // there is one for this number. Fetched after the screen is up so a
+    // slow connection never delays the rest of the record.
+    final rentalNo = rental['rental_no'] as int?;
+    final archive = services.agreementArchive;
+    if (agreement == null && rentalNo != null && archive != null) {
+      _loadArchive(archive, rentalNo);
+    }
     return _RentalData(
       rental: rental,
       customer: customerId == null
@@ -55,6 +64,17 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
   }
 
   bool _photoBusy = false;
+
+  /// Scans of this rental from the pre-app archive, once fetched.
+  List<Uint8List> _archivePhotos = const [];
+  int? _archiveFor;
+
+  Future<void> _loadArchive(AgreementArchive archive, int rentalNo) async {
+    if (_archiveFor == rentalNo) return;
+    _archiveFor = rentalNo;
+    final photos = await archive.photosFor(rentalNo);
+    if (mounted && photos.isNotEmpty) setState(() => _archivePhotos = photos);
+  }
 
   Future<void> _attachPhoto(ImageSource source) async {
     final services = AppScope.of(context);
@@ -308,6 +328,8 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
               const SizedBox(height: 16),
               AgreementCard(
                 image: data.agreementImage,
+                archive:
+                    data.agreementImage == null ? _archivePhotos : const [],
                 rentalLabel: rentalDisplayNumber(rental),
                 busy: _photoBusy,
                 onTakePhoto:

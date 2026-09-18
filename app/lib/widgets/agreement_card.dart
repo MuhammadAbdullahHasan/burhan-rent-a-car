@@ -12,6 +12,11 @@ import 'common.dart';
 /// (camera, gallery) as first-class actions rather than a bare icon.
 class AgreementCard extends StatelessWidget {
   final Uint8List? image;
+
+  /// Scans from the owner's pre-app archive, shown when [image] is null.
+  /// They can be viewed but not removed here; taking a new photo takes
+  /// precedence over them.
+  final List<Uint8List> archive;
   final String title;
 
   /// Rental label used in the viewer's title and the shared file name.
@@ -25,6 +30,7 @@ class AgreementCard extends StatelessWidget {
     super.key,
     required this.image,
     required this.rentalLabel,
+    this.archive = const [],
     this.title = 'RENTAL AGREEMENT',
     this.busy = false,
     this.onTakePhoto,
@@ -97,22 +103,60 @@ class AgreementCard extends StatelessWidget {
               padding: EdgeInsets.symmetric(vertical: 40),
               child: Center(child: CircularProgressIndicator()),
             )
-          : image == null
-              ? _EmptyAgreement(
-                  onTakePhoto: onTakePhoto,
-                  onChooseFromGallery: onChooseFromGallery,
-                )
-              : _AgreementPreview(
-                  image: image,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AgreementViewerScreen(
-                        image: image,
-                        rentalLabel: rentalLabel,
+          : image == null && archive.isNotEmpty
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < archive.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 12),
+                      _AgreementPreview(
+                        image: archive[i],
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => AgreementViewerScreen(
+                              image: archive[i],
+                              rentalLabel: archive.length == 1
+                                  ? rentalLabel
+                                  : '$rentalLabel (${i + 1})',
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Text(
+                      'From the archive',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                  ),
-                ),
+                    if (_canEdit)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: onTakePhoto ?? onChooseFromGallery,
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: const Text('Take a new photo'),
+                        ),
+                      ),
+                  ],
+                )
+              : image == null
+                  ? _EmptyAgreement(
+                      onTakePhoto: onTakePhoto,
+                      onChooseFromGallery: onChooseFromGallery,
+                    )
+                  : _AgreementPreview(
+                      image: image,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => AgreementViewerScreen(
+                            image: image,
+                            rentalLabel: rentalLabel,
+                          ),
+                        ),
+                      ),
+                    ),
     );
   }
 }
