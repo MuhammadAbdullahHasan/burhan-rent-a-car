@@ -308,3 +308,121 @@ create policy "owner manages own agreements" on storage.objects
   for all to authenticated
   using (bucket_id = 'agreements' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'agreements' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ---------------------------------------------------------------------------
+-- 2026-09-19: one business, two logins (see build notes / hand-over).
+-- Applied from the dashboard; kept here so the repo matches the live schema.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- 1. The business and its two members.
+-- ---------------------------------------------------------------------------
+create table if not exists business_members (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  email   text not null unique
+);
+-- Reachable only through the functions below, never through the API.
+revoke all on business_members from anon, authenticated;
+
+insert into business_members (user_id, email) values
+  ('c3e51208-0d18-480c-bf4d-01c90100e4f8', 'burhan.rent.a.car@gmail.com'),
+  ('f9c626da-b85d-412c-aab1-368c09b94a02', 'muhammadabdullahhasan2007@gmail.com')
+on conflict (user_id) do nothing;
+
+-- "Is the signed-in login a member?" -- the one check every rule below uses.
+create or replace function public.is_member() returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from business_members where user_id = auth.uid());
+$$;
+revoke execute on function public.is_member() from public, anon;
+grant  execute on function public.is_member() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 2. No third login, ever: even with sign-ups switched off in the dashboard,
+--    the database itself refuses any account that is not on the list.
+-- ---------------------------------------------------------------------------
+create or replace function public.only_business_members() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from business_members where lower(email) = lower(new.email)) then
+    raise exception 'Sign-ups are closed for this application.';
+  end if;
+  return new;
+end $$;
+revoke execute on function public.only_business_members() from public, anon, authenticated;
+drop trigger if exists auth_users_members_only on auth.users;
+create trigger auth_users_members_only
+  before insert on auth.users for each row execute function public.only_business_members();
+
+
+-- ---------------------------------------------------------------------------
+-- 3. Data rules: members see and manage everything; nobody else sees anything.
+-- ---------------------------------------------------------------------------
+drop policy "owner reads own customers"   on customers;
+drop policy "owner writes own customers"  on customers;
+drop policy "owner updates own customers" on customers;
+drop policy "owner deletes own customers" on customers;
+create policy "members read customers"   on customers for select using (public.is_member());
+create policy "members write customers"  on customers for insert with check (public.is_member());
+create policy "members update customers" on customers for update using (public.is_member()) with check (public.is_member());
+create policy "members delete customers" on customers for delete using (public.is_member());
+
+drop policy "owner reads own vehicles"   on vehicles;
+drop policy "owner writes own vehicles"  on vehicles;
+drop policy "owner updates own vehicles" on vehicles;
+drop policy "owner deletes own vehicles" on vehicles;
+create policy "members read vehicles"   on vehicles for select using (public.is_member());
+create policy "members write vehicles"  on vehicles for insert with check (public.is_member());
+create policy "members update vehicles" on vehicles for update using (public.is_member()) with check (public.is_member());
+create policy "members delete vehicles" on vehicles for delete using (public.is_member());
+
+drop policy "owner reads own rentals"   on rentals;
+drop policy "owner writes own rentals"  on rentals;
+drop policy "owner updates own rentals" on rentals;
+drop policy "owner deletes own rentals" on rentals;
+create policy "members read rentals"   on rentals for select using (public.is_member());
+create policy "members write rentals"  on rentals for insert with check (public.is_member());
+create policy "members update rentals" on rentals for update using (public.is_member()) with check (public.is_member());
+create policy "members delete rentals" on rentals for delete using (public.is_member());
+
+drop policy "owner reads own attachments"   on attachments;
+drop policy "owner writes own attachments"  on attachments;
+drop policy "owner updates own attachments" on attachments;
+drop policy "owner deletes own attachments" on attachments;
+create policy "members read attachments"   on attachments for select using (public.is_member());
+create policy "members write attachments"  on attachments for insert with check (public.is_member());
+create policy "members update attachments" on attachments for update using (public.is_member()) with check (public.is_member());
+create policy "members delete attachments" on attachments for delete using (public.is_member());
+
+drop policy "owner reads own audit log"  on audit_log;
+drop policy "owner writes own audit log" on audit_log;
+create policy "members read audit log"  on audit_log for select using (public.is_member());
+create policy "members write audit log" on audit_log for insert with check (public.is_member());
+
+-- One dataset generation for the business (the row both logins will follow).
+drop policy "owner reads own generation"  on dataset_generation;
+drop policy "owner starts own generation" on dataset_generation;
+drop policy "owner renews own generation" on dataset_generation;
+create policy "members read generation"  on dataset_generation for select using (public.is_member());
+create policy "members start generation" on dataset_generation for insert with check (public.is_member());
+create policy "members renew generation" on dataset_generation for update using (public.is_member()) with check (public.is_member());
+delete from dataset_generation where owner_id <> 'f9c626da-b85d-412c-aab1-368c09b94a02';
+update dataset_generation set generation = gen_random_uuid(), updated_at = now();
+
+-- ---------------------------------------------------------------------------
+-- 4. Files: the business's folder in each bucket, members only.
+-- ---------------------------------------------------------------------------
+drop policy "owner manages own agreements" on storage.objects;
+drop policy "owner manages own backups"    on storage.objects;
+create policy "members manage business files" on storage.objects
+  for all to authenticated
+  using (bucket_id in ('agreements', 'backups')
+         and (storage.foldername(name))[1] = 'f9c626da-b85d-412c-aab1-368c09b94a02'
+         and public.is_member())
+  with check (bucket_id in ('agreements', 'backups')
+         and (storage.foldername(name))[1] = 'f9c626da-b85d-412c-aab1-368c09b94a02'
+         and public.is_member());
+-- The client's one snapshot of the (then empty) dataset, in the old per-login folder.
+delete from storage.objects where bucket_id = 'backups'
+   and (storage.foldername(name))[1] = 'c3e51208-0d18-480c-bf4d-01c90100e4f8';
+

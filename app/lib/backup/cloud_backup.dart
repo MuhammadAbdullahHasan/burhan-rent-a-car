@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../supabase_config.dart';
+
 import '../app_services.dart';
 import 'backup_codec.dart';
 
@@ -22,7 +24,7 @@ class CloudBackup {
 
   CloudBackup({required this.client, required this.db});
 
-  String get _folder => client.auth.currentUser!.id;
+  String get _folder => businessFolder;
 
   Future<DateTime?> lastBackupAt() async {
     final rows = await db.query(

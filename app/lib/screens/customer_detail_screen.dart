@@ -91,6 +91,39 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
+              // The owner searches a customer to see their rentals, so those
+              // come first; the profile and the cars they have driven follow.
+              SectionCard(
+                title: 'COMPLETE RENTAL HISTORY',
+                action: Text('${data.rentals.length}'),
+                child: data.rentals.isEmpty
+                    ? const EmptyState(
+                        icon: Icons.receipt_long_outlined,
+                        message: 'No rentals recorded for this customer.',
+                      )
+                    : Column(
+                        children: [
+                          for (final rental in data.rentals)
+                            RentalTile(
+                              rental: rental,
+                              contextLabel: _vehicleLabel(data, rental),
+                              agreementThumbnail:
+                                  data.thumbnails[rental['id'] as String],
+                              onTap: () async {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => RentalDetailScreen(
+                                      rentalId: rental['id'] as String,
+                                    ),
+                                  ),
+                                );
+                                _reload();
+                              },
+                            ),
+                        ],
+                      ),
+              ),
+              const SizedBox(height: 16),
               SectionCard(
                 title: 'PROFILE',
                 action: TextButton.icon(
@@ -175,37 +208,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                                   MaterialPageRoute(
                                     builder: (_) => VehicleDetailScreen(
                                       vehicleId: vehicle['id'] as String,
-                                    ),
-                                  ),
-                                );
-                                _reload();
-                              },
-                            ),
-                        ],
-                      ),
-              ),
-              const SizedBox(height: 16),
-              SectionCard(
-                title: 'COMPLETE RENTAL HISTORY',
-                action: Text('${data.rentals.length}'),
-                child: data.rentals.isEmpty
-                    ? const EmptyState(
-                        icon: Icons.receipt_long_outlined,
-                        message: 'No rentals recorded for this customer.',
-                      )
-                    : Column(
-                        children: [
-                          for (final rental in data.rentals)
-                            RentalTile(
-                              rental: rental,
-                              contextLabel: _vehicleLabel(data, rental),
-                              agreementThumbnail:
-                                  data.thumbnails[rental['id'] as String],
-                              onTap: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => RentalDetailScreen(
-                                      rentalId: rental['id'] as String,
                                     ),
                                   ),
                                 );

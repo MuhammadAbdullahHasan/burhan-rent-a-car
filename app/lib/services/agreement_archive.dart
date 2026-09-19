@@ -6,8 +6,10 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../supabase_config.dart';
+
 /// The owner's scanned agreements from before the app, kept in the private
-/// `agreements` bucket as `<owner_id>/<rental_no>.jpg` (a second scan of
+/// `agreements` bucket as `<business>/<rental_no>.jpg` (a second scan of
 /// the same rental as `<rental_no>-2.jpg`). A rental that has no photo of
 /// its own shows its archive scan, fetched here on demand and cached on
 /// the device so it opens offline next time. Rentals without a scan get
@@ -26,7 +28,7 @@ class AgreementArchive {
 
   AgreementArchive({required this.client});
 
-  String get _folder => client.auth.currentUser!.id;
+  String get _folder => businessFolder;
 
   /// Every archive scan of [rentalNo], first scan first; empty when there
   /// is none or the device is offline and nothing is cached.

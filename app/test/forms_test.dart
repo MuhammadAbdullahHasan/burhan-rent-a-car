@@ -283,6 +283,8 @@ void main() {
       await goToTab(t, 'Search');
       await searchFor(t, 'Billa');
       await tapAndSettle(t, find.text('Billa Khan'));
+      await t.scrollUntilVisible(find.text('Edit'), 300);
+      await settle(t);
       await tapAndSettle(t, find.text('Edit'));
 
       await enterFieldText(t, 'Full name *', '');
@@ -295,6 +297,8 @@ void main() {
       await pumpApp(t);
       await searchFor(t, 'Billa');
       await tapAndSettle(t, find.text('Billa Khan'));
+      await t.scrollUntilVisible(find.text('Edit'), 300);
+      await settle(t);
       await tapAndSettle(t, find.text('Edit'));
 
       await enterFieldText(t, 'CNIC', '123');
@@ -307,6 +311,8 @@ void main() {
       await pumpApp(t);
       await searchFor(t, 'Billa');
       await tapAndSettle(t, find.text('Billa Khan'));
+      await t.scrollUntilVisible(find.text('Edit'), 300);
+      await settle(t);
       await tapAndSettle(t, find.text('Edit'));
 
       await enterFieldText(t, 'Full name *', 'Billa Khan Sr');
