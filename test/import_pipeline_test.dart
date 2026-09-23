@@ -187,6 +187,37 @@ void main() {
       expect(newRental!['rental_no'], 61); // continues from max real, not 10
     });
 
+    test('vehicle soft-delete: hidden from listings and search, its '
+        'history untouched, and re-typing the plate makes a new vehicle',
+        () async {
+      final engine = LocalSyncEngine();
+      final before = await _vehicles.findByRegistrationNorm(db, 'KHI123');
+      final vehicleId = before!['id'] as String;
+      final rentalsBefore =
+          await _rentals.findByVehicleId(db, vehicleId);
+      expect(rentalsBefore, isNotEmpty);
+
+      await engine.queueSoftDeleteVehicle(db, vehicleId);
+      await engine.syncPending(db);
+
+      final deleted = await _vehicles.getById(db, vehicleId);
+      expect(deleted!['is_deleted'], 1);
+      // Findable directly and by its rentals, but not by a fresh lookup.
+      expect(await _vehicles.findByRegistrationNorm(db, 'KHI123'), isNull);
+      final stats = await _vehicles.listWithStats(db);
+      expect(stats.where((v) => v['id'] == vehicleId), isEmpty);
+      final rentalsAfter = await _rentals.findByVehicleId(db, vehicleId);
+      expect(rentalsAfter, hasLength(rentalsBefore.length));
+
+      // The same registration typed again is a new vehicle, not a revival.
+      final newId = await _vehicles.insert(
+        db,
+        registrationNo: 'KHI-123',
+        registrationNorm: 'KHI123',
+      );
+      expect(newId, isNot(vehicleId));
+    });
+
     test('12. backup export produces expected counts', () async {
       final snapshot = await exportSnapshot(db);
       expect(snapshot.customers, hasLength(10));

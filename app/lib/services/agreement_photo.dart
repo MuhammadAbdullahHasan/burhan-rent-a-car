@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
+import 'web_camera_screen.dart';
+
 /// A captured agreement photo, ready to store: a display-size JPEG plus a
 /// small thumbnail for lists.
 class AgreementPhoto {
@@ -52,12 +54,28 @@ class AgreementPhotoPicker {
         ),
       ),
     );
-    if (source == null) return null;
-    return pickFrom(source);
+    if (source == null || !context.mounted) return null;
+    return pickFrom(source, context: context);
   }
 
   /// Captures from a specific source without asking.
-  Future<AgreementPhoto?> pickFrom(ImageSource source) async {
+  ///
+  /// In a browser, [ImageSource.camera] opens the in-page camera view
+  /// ([WebCameraScreen]) when a [context] is given: the file input's
+  /// camera hint only works in phones' browsers, and a desktop browser
+  /// would otherwise just show a file picker. If the camera cannot be
+  /// used there, the owner is offered the file picker instead.
+  Future<AgreementPhoto?> pickFrom(
+    ImageSource source, {
+    BuildContext? context,
+  }) async {
+    if (kIsWeb && source == ImageSource.camera && context != null) {
+      final bytes = await WebCameraScreen.capture(context);
+      if (bytes != null) return process(bytes);
+      if (!context.mounted) return null;
+      // Backed out (or no camera): fall through to the file picker.
+      source = ImageSource.gallery;
+    }
     final picked = await _picker.pickImage(
       source: source,
       maxWidth: 1600,

@@ -150,6 +150,31 @@ class VehicleRepository {
     await db.update('vehicles', updates, where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Hidden from lists and search, but never erased: its own record (and
+  /// every rental that references it) can still be opened directly.
+  /// `registration_norm` is cleared -- the column is unique, and a null
+  /// there is never a match for another row's, so the plate frees up for a
+  /// fresh vehicle immediately rather than being stuck on the deleted one.
+  /// `registration_no` is untouched, so the deleted record still displays
+  /// correctly wherever it's reached.
+  Future<void> softDelete(
+    DatabaseExecutor db,
+    String id,
+    int currentVersion,
+  ) async {
+    await db.update(
+      'vehicles',
+      {
+        'is_deleted': 1,
+        'registration_norm': null,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'version': currentVersion + 1,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// Compares a newly seen row's attributes against the stored vehicle and
   /// returns a human-readable mismatch description, or null if consistent.
   /// Never mutates -- the import pipeline logs this as a warning for manual

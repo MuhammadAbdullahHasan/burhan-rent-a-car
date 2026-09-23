@@ -65,7 +65,8 @@ class _RentalFormScreenState extends State<RentalFormScreen> {
   Future<void> _capturePhoto(ImageSource source) async {
     setState(() => _photoBusy = true);
     try {
-      final photo = await AgreementPhotoPicker().pickFrom(source);
+      final photo =
+          await AgreementPhotoPicker().pickFrom(source, context: context);
       if (photo != null && mounted) setState(() => _pendingPhoto = photo);
     } catch (e) {
       if (mounted) {

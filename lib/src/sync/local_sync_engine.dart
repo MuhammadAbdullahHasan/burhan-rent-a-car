@@ -120,6 +120,22 @@ class LocalSyncEngine {
     });
   }
 
+  /// A vehicle sold, retired or entered by mistake: hidden from the Library
+  /// and search, its history untouched. See [VehicleRepository.softDelete].
+  Future<void> queueSoftDeleteVehicle(Database db, String vehicleId) async {
+    await db.transaction((txn) async {
+      final existing = await vehicles.getById(txn, vehicleId);
+      if (existing == null) return;
+      await vehicles.softDelete(txn, vehicleId, existing['version'] as int);
+      await outbox.enqueue(
+        txn,
+        entityType: 'vehicle',
+        entityId: vehicleId,
+        operation: 'delete',
+      );
+    });
+  }
+
   /// Customer and vehicle mutations go through the same outbox as rentals,
   /// so the invariant "every local mutation is queued" already holds when
   /// the real sync engine replaces this class. Neither entity has a

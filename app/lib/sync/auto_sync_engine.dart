@@ -67,6 +67,12 @@ class AutoSyncEngine extends LocalSyncEngine {
   }
 
   @override
+  Future<void> queueSoftDeleteVehicle(Database db, String vehicleId) async {
+    await super.queueSoftDeleteVehicle(db, vehicleId);
+    onLocalChange();
+  }
+
+  @override
   Future<String> createCustomer(
     Database db, {
     String? fullName,
