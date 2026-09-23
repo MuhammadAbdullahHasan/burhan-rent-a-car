@@ -8,7 +8,6 @@ import '../widgets/common.dart';
 import '../widgets/rental_tile.dart';
 import 'customer_form_screen.dart';
 import 'rental_detail_screen.dart';
-import 'vehicle_detail_screen.dart';
 
 /// Customer -> complete profile -> all rental history -> other vehicles.
 class CustomerDetailScreen extends StatefulWidget {
@@ -181,41 +180,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              SectionCard(
-                title: 'OTHER VEHICLES RENTED',
-                action: Text('${data.vehicles.length}'),
-                child: data.vehicles.isEmpty
-                    ? const EmptyState(
-                        icon: Icons.directions_car_outlined,
-                        message: 'No vehicles linked yet.',
-                      )
-                    : Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final vehicle in data.vehicles)
-                            ActionChip(
-                              avatar:
-                                  const Icon(Icons.directions_car, size: 18),
-                              label: Text(
-                                '${displayOrNA(vehicle['registration_no'])}'
-                                '  ·  ${vehicle['rental_count']}',
-                              ),
-                              onPressed: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => VehicleDetailScreen(
-                                      vehicleId: vehicle['id'] as String,
-                                    ),
-                                  ),
-                                );
-                                _reload();
-                              },
-                            ),
-                        ],
-                      ),
               ),
             ],
           );

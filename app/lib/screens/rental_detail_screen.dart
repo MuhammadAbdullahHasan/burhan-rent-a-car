@@ -12,7 +12,6 @@ import '../widgets/agreement_card.dart';
 import '../widgets/common.dart';
 import 'customer_detail_screen.dart';
 import 'rental_form_screen.dart';
-import 'vehicle_detail_screen.dart';
 
 class RentalDetailScreen extends StatefulWidget {
   final String rentalId;
@@ -82,7 +81,7 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
     final picker = AgreementPhotoPicker();
     setState(() => _photoBusy = true);
     try {
-      final photo = await picker.pickFrom(source);
+      final photo = await picker.pickFrom(source, context: context);
       if (photo == null) {
         // Either the user backed out, or the file wasn't a readable image.
         return;
@@ -310,6 +309,21 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                       ),
                     const SizedBox(height: 12),
                     DetailField(
+                      label: 'Customer name',
+                      value: data.customer?['full_name'],
+                    ),
+                    // The old system's father/husband name: kept in the
+                    // remarks blob by the import, shown here as its own row.
+                    DetailField(
+                      label: 'S/o',
+                      value: remarksValue(rental['remarks'], 'Father/Husband'),
+                    ),
+                    DetailField(
+                      label: 'Cell number',
+                      value: data.customer?['phone'],
+                    ),
+                    DetailField(label: 'CNIC', value: data.customer?['cnic']),
+                    DetailField(
                         label: 'Start date', value: rental['start_date']),
                     DetailField(
                         label: 'Start time', value: rental['start_time']),
@@ -321,24 +335,16 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                         label: 'Booked days', value: rental['book_days']),
                     DetailField(label: 'Amount', value: rental['amount']),
                     DetailField(label: 'Balance', value: rental['balance']),
-                    DetailField(label: 'Remarks', value: rental['remarks']),
+                    DetailField(
+                      label: 'Remarks',
+                      // The two labels above have their own rows now.
+                      value: remarksWithout(
+                        rental['remarks'],
+                        const ['Father/Husband', 'Ref. NIC'],
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              AgreementCard(
-                image: data.agreementImage,
-                archive:
-                    data.agreementImage == null ? _archivePhotos : const [],
-                rentalLabel: rentalDisplayNumber(rental),
-                busy: _photoBusy,
-                onTakePhoto:
-                    isDeleted ? null : () => _attachPhoto(ImageSource.camera),
-                onChooseFromGallery:
-                    isDeleted ? null : () => _attachPhoto(ImageSource.gallery),
-                onRemove: isDeleted || data.agreementImage == null
-                    ? null
-                    : _removePhoto,
               ),
               const SizedBox(height: 16),
               SectionCard(
@@ -347,6 +353,10 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                   children: [
                     DetailField(label: 'Name', value: rental['ref_name']),
                     DetailField(label: 'Contact', value: rental['ref_contact']),
+                    DetailField(
+                      label: 'CNIC',
+                      value: remarksValue(rental['remarks'], 'Ref. NIC'),
+                    ),
                     DetailField(
                         label: 'Relation', value: rental['ref_relation']),
                   ],
@@ -371,27 +381,20 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                         _reload();
                       },
               ),
-              const SizedBox(height: 12),
-              _LinkCard(
-                icon: Icons.directions_car,
-                title: 'VEHICLE',
-                label: displayOrNA(data.vehicle?['registration_no']),
-                subtitle: [
-                  data.vehicle?['company'],
-                  data.vehicle?['model_name'],
-                ].where((v) => v != null).join(' '),
-                onTap: data.vehicle == null
+              const SizedBox(height: 16),
+              AgreementCard(
+                image: data.agreementImage,
+                archive:
+                    data.agreementImage == null ? _archivePhotos : const [],
+                rentalLabel: rentalDisplayNumber(rental),
+                busy: _photoBusy,
+                onTakePhoto:
+                    isDeleted ? null : () => _attachPhoto(ImageSource.camera),
+                onChooseFromGallery:
+                    isDeleted ? null : () => _attachPhoto(ImageSource.gallery),
+                onRemove: isDeleted || data.agreementImage == null
                     ? null
-                    : () async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => VehicleDetailScreen(
-                              vehicleId: data.vehicle!['id'] as String,
-                            ),
-                          ),
-                        );
-                        _reload();
-                      },
+                    : _removePhoto,
               ),
               const SizedBox(height: 24),
               if (!isDeleted) ...[

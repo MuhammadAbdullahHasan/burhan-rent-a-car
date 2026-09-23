@@ -93,7 +93,7 @@ void main() {
     expect(find.text('22 rentals'), findsOneWidget);
   });
 
-  testWidgets('vehicle drill-down reaches customers and history', (t) async {
+  testWidgets('vehicle drill-down reaches its customers', (t) async {
     await pumpApp(t);
     await goToTab(t, 'Library');
     await tapAndSettle(t, find.text('KHI-123'));
@@ -108,9 +108,40 @@ void main() {
     expect(find.text('CUSTOMERS WHO RENTED THIS VEHICLE'), findsOneWidget);
     expect(find.text('Billa Khan'), findsWidgets);
 
-    await t.scrollUntilVisible(find.text('COMPLETE RENTAL HISTORY'), 300);
+    // The vehicle's own rental list was dropped: its rentals are reached
+    // through the customers above, one drill-down deeper.
+    expect(find.text('COMPLETE RENTAL HISTORY'), findsNothing);
+  });
+
+  testWidgets('a vehicle can be deleted: confirmed, gone from the Library, '
+      'its rentals keep their history', (t) async {
+    await pumpApp(t);
+    await goToTab(t, 'Library');
+    await tapAndSettle(t, find.text('KHI-123'));
+
+    await t.scrollUntilVisible(find.text('Delete vehicle'), 300);
     await settle(t);
-    expect(find.text('COMPLETE RENTAL HISTORY'), findsOneWidget);
+    await tapAndSettle(t, find.text('Delete vehicle'));
+    expect(find.text('Delete KHI-123?'), findsOneWidget);
+    expect(find.textContaining('keep their history'), findsOneWidget);
+
+    // Backing out changes nothing.
+    await tapAndSettle(t, find.text('Cancel'));
+    expect(find.text('Vehicle Details'), findsOneWidget);
+
+    await tapAndSettle(t, find.text('Delete vehicle'));
+    await tapAndSettle(t, find.widgetWithText(FilledButton, 'Delete'));
+
+    // Back in the Library, without it.
+    expect(find.byType(LibraryScreen), findsOneWidget);
+    expect(find.text('KHI-123'), findsNothing);
+
+    // Its rentals are untouched: still findable, still opening.
+    await searchFor(t, '5');
+    expect(find.text('Rental #5'), findsOneWidget);
+    await tapAndSettle(t, find.text('Rental #5'));
+    expect(find.text('Rental'), findsWidgets);
+    expect(find.text('#5'), findsWidgets);
   });
 
   testWidgets('universal search finds a customer by partial name', (t) async {

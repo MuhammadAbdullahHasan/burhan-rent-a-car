@@ -78,33 +78,51 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
               message: 'This vehicle no longer exists.',
             );
           }
+          final isDeleted = (vehicle['is_deleted'] as int? ?? 0) == 1;
+          final theme = Theme.of(context);
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
               SectionCard(
                 title: 'VEHICLE',
-                action: TextButton.icon(
-                  onPressed: () async {
-                    final saved = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(
-                        builder: (_) => VehicleFormScreen(vehicle: vehicle),
+                action: isDeleted
+                    ? null
+                    : TextButton.icon(
+                        onPressed: () async {
+                          final saved = await Navigator.of(context).push<bool>(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  VehicleFormScreen(vehicle: vehicle),
+                            ),
+                          );
+                          if (saved == true) _reload();
+                        },
+                        icon: const Icon(Icons.edit, size: 18),
+                        label: const Text('Edit'),
                       ),
-                    );
-                    if (saved == true) _reload();
-                  },
-                  icon: const Icon(Icons.edit, size: 18),
-                  label: const Text('Edit'),
-                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      displayOrNA(vehicle['registration_no']),
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            displayOrNA(vehicle['registration_no']),
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (isDeleted)
+                          Text(
+                            'DELETED',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     DetailField(label: 'Company', value: vehicle['company']),
@@ -169,41 +187,62 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                         ],
                       ),
               ),
-              const SizedBox(height: 16),
-              SectionCard(
-                title: 'COMPLETE RENTAL HISTORY',
-                action: Text('${data.rentals.length}'),
-                child: data.rentals.isEmpty
-                    ? const EmptyState(
-                        icon: Icons.receipt_long_outlined,
-                        message: 'No rentals recorded for this vehicle.',
-                      )
-                    : Column(
-                        children: [
-                          for (final rental in data.rentals)
-                            RentalTile(
-                              rental: rental,
-                              agreementThumbnail:
-                                  data.thumbnails[rental['id'] as String],
-                              onTap: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => RentalDetailScreen(
-                                      rentalId: rental['id'] as String,
-                                    ),
-                                  ),
-                                );
-                                _reload();
-                              },
-                            ),
-                        ],
-                      ),
-              ),
+              if (!isDeleted) ...[
+                const SizedBox(height: 24),
+                TextButton.icon(
+                  onPressed: () => _delete(vehicle, data.rentals.length),
+                  style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.error,
+                  ),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete vehicle'),
+                ),
+              ],
             ],
           );
         },
       ),
     );
+  }
+
+  Future<void> _delete(Map<String, Object?> vehicle, int rentalCount) async {
+    final services = AppScope.of(context);
+    final navigator = Navigator.of(context);
+    final reg = displayOrNA(vehicle['registration_no']);
+    final history = rentalCount == 0
+        ? ''
+        : ', and its $rentalCount rental${rentalCount == 1 ? '' : 's'} keep '
+            'their history';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete $reg?'),
+        content: Text(
+          'It will be hidden from the Library and search, and can no '
+          'longer be chosen for a new rental. It is never erased$history — '
+          'its record and every rental against it can still be opened '
+          'directly, and re-entering the same registration later creates a '
+          'new vehicle rather than reviving this one.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await services.engine
+        .queueSoftDeleteVehicle(services.db, vehicle['id'] as String);
+    navigator.pop();
   }
 }
 
