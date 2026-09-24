@@ -120,6 +120,30 @@ class LocalSyncEngine {
     });
   }
 
+  /// Moves a vehicle between the working fleet and the past records.
+  Future<void> setVehicleInFleet(
+    Database db,
+    String vehicleId,
+    bool inFleet,
+  ) async {
+    await db.transaction((txn) async {
+      final existing = await vehicles.getById(txn, vehicleId);
+      if (existing == null) return;
+      await vehicles.setInFleet(
+        txn,
+        vehicleId,
+        inFleet,
+        existing['version'] as int,
+      );
+      await outbox.enqueue(
+        txn,
+        entityType: 'vehicle',
+        entityId: vehicleId,
+        operation: 'update',
+      );
+    });
+  }
+
   /// A vehicle sold, retired or entered by mistake: hidden from the Library
   /// and search, its history untouched. See [VehicleRepository.softDelete].
   Future<void> queueSoftDeleteVehicle(Database db, String vehicleId) async {

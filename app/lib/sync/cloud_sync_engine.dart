@@ -622,6 +622,9 @@ class CloudSyncEngine {
           'color': r['color'],
           'reg_year': r['reg_year'],
           'insurance_due_on': r['insurance_due_on'],
+          // A server that has not got the column yet means
+          // "in fleet", never "past".
+          'in_fleet': r['in_fleet'] == null ? 1 : _asInt(r['in_fleet']),
           'is_deleted': _asInt(r['is_deleted']),
           'version': r['version'],
           'created_at': r['created_at'],
@@ -1181,6 +1184,7 @@ class CloudSyncEngine {
         'color': r['color'],
         'reg_year': r['reg_year'],
         'insurance_due_on': r['insurance_due_on'],
+        'in_fleet': r['in_fleet'] == null ? true : _asBool(r['in_fleet']),
         'is_deleted': _asBool(r['is_deleted']),
         'version': r['version'],
         'created_at': r['created_at'],

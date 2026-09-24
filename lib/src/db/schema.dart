@@ -9,7 +9,7 @@
 /// touches the import mapper, not this schema.
 library;
 
-const schemaVersion = 3;
+const schemaVersion = 4;
 
 const List<String> createTableStatements = [
   '''
@@ -46,6 +46,7 @@ const List<String> createTableStatements = [
     color               TEXT,
     reg_year            INTEGER,
     insurance_due_on    TEXT,
+    in_fleet            INTEGER NOT NULL DEFAULT 1,
     is_deleted          INTEGER NOT NULL DEFAULT 0,
     version             INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT NOT NULL,
@@ -160,4 +161,15 @@ const List<String> syncConflictsTableStatements = [
   )
   ''',
   'CREATE INDEX idx_sync_conflicts_open ON sync_conflicts(resolved)',
+];
+
+/// Which vehicles the owner still runs, as opposed to plates that only
+/// appear in the old records. Twenty years of history name ~400 vehicles;
+/// the owner says which are the working fleet, and the Library shows the
+/// rest behind "Show past vehicles".
+///
+/// Schema version 4. Also applied by `onUpgrade` for older databases,
+/// which seed it from the last-rental heuristic the app used before.
+const List<String> vehicleInFleetStatements = [
+  'ALTER TABLE vehicles ADD COLUMN in_fleet INTEGER NOT NULL DEFAULT 1',
 ];

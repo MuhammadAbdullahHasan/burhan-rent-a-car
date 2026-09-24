@@ -34,6 +34,27 @@ Future<Database> openAppDatabase(
             await db.execute(statement);
           }
         }
+        if (oldVersion < 4) {
+          for (final statement in vehicleInFleetStatements) {
+            await db.execute(statement);
+          }
+          // Until the cloud says otherwise, keep what the app showed
+          // before: a vehicle rented in the last two years, or one the
+          // owner has described, is in the fleet.
+          await db.execute('''
+            UPDATE vehicles SET in_fleet = 0
+            WHERE COALESCE(company, '') = ''
+              AND COALESCE(model_name, '') = ''
+              AND COALESCE(chassis_no, '') = ''
+              AND COALESCE(engine_no, '') = ''
+              AND COALESCE(insurance_due_on, '') = ''
+              AND id NOT IN (
+                SELECT vehicle_id FROM rentals
+                WHERE vehicle_id IS NOT NULL AND is_deleted = 0
+                  AND COALESCE(start_date, '') >= date('now', '-2 years')
+              )
+          ''');
+        }
       },
     ),
   );

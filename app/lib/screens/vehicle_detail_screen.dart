@@ -188,6 +188,25 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                       ),
               ),
               if (!isDeleted) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: SwitchListTile(
+                    value: VehicleRepository.isInFleet(vehicle),
+                    onChanged: (value) => _setInFleet(vehicle, value),
+                    title: const Text('In the current fleet'),
+                    subtitle: Text(
+                      VehicleRepository.isInFleet(vehicle)
+                          ? 'Shown in the Library with the working fleet.'
+                          : 'Kept with the past vehicles. Its rentals and '
+                              'history are unchanged.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  ),
+                ),
                 const SizedBox(height: 24),
                 TextButton.icon(
                   onPressed: () => _delete(vehicle, data.rentals.length),
@@ -203,6 +222,24 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _setInFleet(Map<String, Object?> vehicle, bool inFleet) async {
+    final services = AppScope.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    await services.engine.setVehicleInFleet(
+      services.db,
+      vehicle['id'] as String,
+      inFleet,
+    );
+    if (!mounted) return;
+    messenger.showSnackBar(SnackBar(
+      content: Text(inFleet
+          ? '${displayOrNA(vehicle['registration_no'])} is back in the fleet.'
+          : '${displayOrNA(vehicle['registration_no'])} moved to past '
+              'vehicles.'),
+    ));
+    _reload();
   }
 
   Future<void> _delete(Map<String, Object?> vehicle, int rentalCount) async {

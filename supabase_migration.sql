@@ -426,3 +426,12 @@ create policy "members manage business files" on storage.objects
 delete from storage.objects where bucket_id = 'backups'
    and (storage.foldername(name))[1] = 'c3e51208-0d18-480c-bf4d-01c90100e4f8';
 
+
+-- ---------------------------------------------------------------------------
+-- The working fleet. Twenty years of history name ~400 vehicles; the owner
+-- says which are still theirs, and the Library keeps the rest behind
+-- "Show past vehicles". Adding the column does not touch synced_at (DDL
+-- does not fire the row trigger), so devices are not made to re-pull
+-- everything; the UPDATE that follows only touches the rows it changes.
+-- ---------------------------------------------------------------------------
+alter table vehicles add column in_fleet boolean not null default true;

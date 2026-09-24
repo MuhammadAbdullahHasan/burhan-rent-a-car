@@ -77,33 +77,31 @@ class VehicleRepository {
     ''');
   }
 
-  /// Whether a [listWithStats] row is part of the working fleet rather than
-  /// a plate from the old records. Twenty years of history name ~400
-  /// vehicles, most last rented before 2015; the fleet is the ones rented
-  /// within [idleYears] years, plus anything the owner has described
-  /// (make, model, chassis, insurance) or added by hand and not rented yet.
-  static bool isInFleet(Map<String, Object?> row,
-      {DateTime? now, int idleYears = 2}) {
-    final last = row['last_rental_on'] as String?;
-    if (last == null) return true; // never rented: just added by hand
-    final lastDate = DateTime.tryParse(last);
-    if (lastDate != null) {
-      final today = now ?? DateTime.now();
-      if (!lastDate
-          .isBefore(DateTime(today.year - idleYears, today.month, today.day))) {
-        return true;
-      }
-    }
-    for (final col in [
-      'company',
-      'model_name',
-      'chassis_no',
-      'engine_no',
-      'insurance_due_on'
-    ]) {
-      if ((row[col] as String?)?.trim().isNotEmpty ?? false) return true;
-    }
-    return false;
+  /// Whether a vehicle is part of the working fleet. The owner decides
+  /// this per vehicle ([setInFleet]); everything else is a plate that only
+  /// appears in the old records, which the Library keeps behind "Show past
+  /// vehicles". A row from before the column existed counts as in-fleet.
+  static bool isInFleet(Map<String, Object?> row) =>
+      (row['in_fleet'] as int? ?? 1) == 1;
+
+  /// Moves a vehicle into the fleet or out to the past records. Nothing
+  /// about its rentals changes either way.
+  Future<void> setInFleet(
+    DatabaseExecutor db,
+    String id,
+    bool inFleet,
+    int currentVersion,
+  ) async {
+    await db.update(
+      'vehicles',
+      {
+        'in_fleet': inFleet ? 1 : 0,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'version': currentVersion + 1,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   /// Distinct customers who have rented this vehicle, each with how many

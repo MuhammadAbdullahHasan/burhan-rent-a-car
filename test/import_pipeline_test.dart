@@ -25,7 +25,8 @@ final _rentals = RentalRepository();
 /// ':memory:' path, which sqflite would otherwise cache as one instance
 /// across tests) so cases are fully isolated from each other.
 Future<Database> _freshDb(String tempDir) async {
-  final path = p.join(tempDir, 'test_${DateTime.now().microsecondsSinceEpoch}.db');
+  final path =
+      p.join(tempDir, 'test_${DateTime.now().microsecondsSinceEpoch}.db');
   return openAppDatabaseFfi(path);
 }
 
@@ -67,8 +68,10 @@ void main() {
     test('1. exact rental search "23" -> only Rental #23', () async {
       final rental = await _rentals.findByRentalNo(db, 23);
       expect(rental, isNotNull);
-      final customer = await _customers.getById(db, rental!['customer_id'] as String);
-      final vehicle = await _vehicles.getById(db, rental['vehicle_id'] as String);
+      final customer =
+          await _customers.getById(db, rental!['customer_id'] as String);
+      final vehicle =
+          await _vehicles.getById(db, rental['vehicle_id'] as String);
       expect(customer!['full_name'], 'Billa Khan');
       expect(vehicle!['registration_norm'], 'KHI654');
       expect(rental['status'], 'Open');
@@ -117,7 +120,8 @@ void main() {
     test('6. missing historical numbers show as placeholders', () async {
       for (final gap in [4, 11, 25, 40, 55]) {
         final rental = await _rentals.findByRentalNo(db, gap);
-        expect(rental, isNotNull, reason: 'rental #$gap must still exist as a row');
+        expect(rental, isNotNull,
+            reason: 'rental #$gap must still exist as a row');
         expect(rental!['is_placeholder'], 1);
         expect(rental['customer_id'], isNull);
         expect(rental['vehicle_id'], isNull);
@@ -132,7 +136,8 @@ void main() {
       // same customer as other rows where it was present -- the merged
       // customer profile is still complete.
       final rental18 = await _rentals.findByRentalNo(db, 18);
-      final customer = await _customers.getById(db, rental18!['customer_id'] as String);
+      final customer =
+          await _customers.getById(db, rental18!['customer_id'] as String);
       expect(customer!['full_name'], 'Fahad Khan');
       expect(customer['cnic'], isNotNull);
     });
@@ -145,7 +150,8 @@ void main() {
 
       final pending = await db.query(
         'sync_queue',
-        where: "entity_type = 'rental' AND entity_id = ? AND status = 'pending'",
+        where:
+            "entity_type = 'rental' AND entity_id = ? AND status = 'pending'",
         whereArgs: [id],
       );
       expect(pending, hasLength(1));
@@ -159,13 +165,15 @@ void main() {
       expect(rental!['rental_no'], 61);
     });
 
-    test('10. edit offline then sync: no duplicate row, version bumped', () async {
+    test('10. edit offline then sync: no duplicate row, version bumped',
+        () async {
       final engine = LocalSyncEngine();
       final before = await _rentals.findByRentalNo(db, 58);
       await engine.queueUpdate(db, before!['id'] as String, {'balance': 999.0});
       await engine.syncPending(db);
 
-      final matches = await db.query('rentals', where: 'rental_no = ?', whereArgs: [58]);
+      final matches =
+          await db.query('rentals', where: 'rental_no = ?', whereArgs: [58]);
       expect(matches, hasLength(1));
       expect(matches.first['balance'], 999.0);
       expect(matches.first['version'], (before['version'] as int) + 1);
@@ -187,14 +195,14 @@ void main() {
       expect(newRental!['rental_no'], 61); // continues from max real, not 10
     });
 
-    test('vehicle soft-delete: hidden from listings and search, its '
+    test(
+        'vehicle soft-delete: hidden from listings and search, its '
         'history untouched, and re-typing the plate makes a new vehicle',
         () async {
       final engine = LocalSyncEngine();
       final before = await _vehicles.findByRegistrationNorm(db, 'KHI123');
       final vehicleId = before!['id'] as String;
-      final rentalsBefore =
-          await _rentals.findByVehicleId(db, vehicleId);
+      final rentalsBefore = await _rentals.findByVehicleId(db, vehicleId);
       expect(rentalsBefore, isNotEmpty);
 
       await engine.queueSoftDeleteVehicle(db, vehicleId);
@@ -265,7 +273,8 @@ void main() {
       final reopened = await openAppDatabaseFfi(path);
       final pending = await reopened.query(
         'sync_queue',
-        where: "entity_type = 'rental' AND entity_id = ? AND status = 'pending'",
+        where:
+            "entity_type = 'rental' AND entity_id = ? AND status = 'pending'",
         whereArgs: [id],
       );
       expect(pending, hasLength(1));
@@ -310,7 +319,8 @@ void main() {
       expect(rows, isEmpty);
     });
 
-    test('malformed date is a warning, not an abort -- row is still imported', () async {
+    test('malformed date is a warning, not an abort -- row is still imported',
+        () async {
       const csvContent = 'Rental#,Date,Name\n1,not-a-date,Test Person\n';
       final pipeline = ImportPipeline(mapper: TestCsvMapper());
       final report = await pipeline.importCsvString(db, csvContent);
@@ -330,7 +340,8 @@ void main() {
     setUp(() async => db = await _freshDb(tempDir.path));
     tearDown(() async => db.close());
 
-    test('backfill fills a null field without overwriting existing ones', () async {
+    test('backfill fills a null field without overwriting existing ones',
+        () async {
       final id = await _customers.insert(
         db,
         fullName: 'Backfill Test',
@@ -354,6 +365,78 @@ void main() {
       expect(updated!['phone'], '03000000000');
       expect(updated['cnic'], '42201-9999999-9');
       expect(updated['version'], 2);
+    });
+  });
+
+  /// The owner decides which plates are the working fleet; the rest stay in
+  /// the Library behind "Show past vehicles". See VehicleRepository.
+  group('the working fleet is the owner\'s list, not a guess', () {
+    late Directory tempDir;
+    late Database db;
+    final vehicles = VehicleRepository();
+    final engine = LocalSyncEngine();
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('fleet_flag_');
+      db = await _freshDb(tempDir.path);
+    });
+
+    tearDown(() async {
+      await db.close();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('a vehicle starts in the fleet and can be moved out and back',
+        () async {
+      final id = await engine.createVehicle(
+        db,
+        registrationNo: 'BKY-391',
+        registrationNorm: 'BKY391',
+      );
+      var row = (await vehicles.getById(db, id))!;
+      expect(VehicleRepository.isInFleet(row), isTrue);
+
+      await engine.setVehicleInFleet(db, id, false);
+      row = (await vehicles.getById(db, id))!;
+      expect(VehicleRepository.isInFleet(row), isFalse);
+      expect(row['version'], 2, reason: 'an edit like any other');
+
+      await engine.setVehicleInFleet(db, id, true);
+      expect(VehicleRepository.isInFleet((await vehicles.getById(db, id))!),
+          isTrue);
+    });
+
+    test('moving it out keeps its rentals and its record', () async {
+      final vehicleId = await engine.createVehicle(
+        db,
+        registrationNo: 'ATU-999',
+        registrationNorm: 'ATU999',
+      );
+      await engine.createPendingRental(db, vehicleId: vehicleId, amount: 4500);
+      await engine.setVehicleInFleet(db, vehicleId, false);
+
+      expect(await vehicles.getById(db, vehicleId), isNotNull);
+      expect(await vehicles.findByRegistrationNorm(db, 'ATU999'), isNotNull);
+      final rentals = await RentalRepository().findByVehicleId(db, vehicleId);
+      expect(rentals, hasLength(1));
+      // Still listed, so the Library can show it under past vehicles.
+      final listed = await vehicles.listWithStats(db);
+      expect(listed.where((v) => v['id'] == vehicleId), hasLength(1));
+    });
+
+    test('every change is queued for the cloud', () async {
+      final id = await engine.createVehicle(
+        db,
+        registrationNo: 'BQZ-405',
+        registrationNorm: 'BQZ405',
+      );
+      await engine.setVehicleInFleet(db, id, false);
+      final queued = await db.query(
+        'sync_queue',
+        where: "entity_id = ? AND operation = 'update'",
+        whereArgs: [id],
+      );
+      expect(queued, hasLength(1));
     });
   });
 }

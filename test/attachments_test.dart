@@ -68,8 +68,10 @@ void main() {
 
     test('replacing keeps one live photo and retires the old one', () async {
       final id = await rentalId(23);
-      await engine.setRentalAgreementPhoto(db, rentalId: id, image: _fakeJpeg(1));
-      await engine.setRentalAgreementPhoto(db, rentalId: id, image: _fakeJpeg(2));
+      await engine.setRentalAgreementPhoto(db,
+          rentalId: id, image: _fakeJpeg(1));
+      await engine.setRentalAgreementPhoto(db,
+          rentalId: id, image: _fakeJpeg(2));
 
       final live = await attachments.rentalAgreement(db, id);
       expect(live!['image'], _fakeJpeg(2));
@@ -85,11 +87,13 @@ void main() {
 
     test('removing soft-deletes; nothing is ever erased', () async {
       final id = await rentalId(23);
-      await engine.setRentalAgreementPhoto(db, rentalId: id, image: _fakeJpeg(1));
+      await engine.setRentalAgreementPhoto(db,
+          rentalId: id, image: _fakeJpeg(1));
       await engine.removeRentalAgreementPhoto(db, id);
 
       expect(await attachments.rentalAgreement(db, id), isNull);
-      final rows = await db.query('attachments', where: 'entity_id = ?', whereArgs: [id]);
+      final rows = await db
+          .query('attachments', where: 'entity_id = ?', whereArgs: [id]);
       expect(rows, hasLength(1));
       expect(rows.single['is_deleted'], 1);
     });
@@ -98,8 +102,10 @@ void main() {
       final a = await rentalId(1);
       final b = await rentalId(12);
       final c = await rentalId(13); // no photo
-      await engine.setRentalAgreementPhoto(db, rentalId: a, image: _fakeJpeg(1), thumbnail: _fakeJpeg(11, 64));
-      await engine.setRentalAgreementPhoto(db, rentalId: b, image: _fakeJpeg(2), thumbnail: _fakeJpeg(12, 64));
+      await engine.setRentalAgreementPhoto(db,
+          rentalId: a, image: _fakeJpeg(1), thumbnail: _fakeJpeg(11, 64));
+      await engine.setRentalAgreementPhoto(db,
+          rentalId: b, image: _fakeJpeg(2), thumbnail: _fakeJpeg(12, 64));
 
       final thumbs = await attachments.agreementThumbnails(db, [a, b, c]);
       expect(thumbs.keys, unorderedEquals([a, b]));
@@ -108,7 +114,8 @@ void main() {
 
     test('every photo change is queued for sync', () async {
       final id = await rentalId(23);
-      await engine.setRentalAgreementPhoto(db, rentalId: id, image: _fakeJpeg(1));
+      await engine.setRentalAgreementPhoto(db,
+          rentalId: id, image: _fakeJpeg(1));
       await engine.removeRentalAgreementPhoto(db, id);
 
       final queued = await db.query(
@@ -121,12 +128,14 @@ void main() {
 
     test('backup snapshot carries photos and restore is idempotent', () async {
       final id = await rentalId(23);
-      await engine.setRentalAgreementPhoto(db, rentalId: id, image: _fakeJpeg(9));
+      await engine.setRentalAgreementPhoto(db,
+          rentalId: id, image: _fakeJpeg(9));
 
       final snapshot = await exportSnapshot(db);
       expect(snapshot.attachments, hasLength(1));
 
-      final fresh = await openAppDatabaseFfi(p.join(tempDir.path, 'restore.db'));
+      final fresh =
+          await openAppDatabaseFfi(p.join(tempDir.path, 'restore.db'));
       await restoreSnapshot(fresh, snapshot);
       await restoreSnapshot(fresh, snapshot);
       final restored = await attachments.rentalAgreement(fresh, id);
@@ -153,12 +162,18 @@ void main() {
                   syncConflictsTableStatements.contains(statement)) {
                 continue;
               }
-              await db.execute(statement);
+              // v1 had no in_fleet column either: strip it back out so the
+              // upgrade has to add it, exactly as it does on a real device.
+              await db.execute(statement.replaceAll(
+                RegExp(r'\s*in_fleet\s+INTEGER NOT NULL DEFAULT 1,'),
+                '',
+              ));
             }
           },
         ),
       );
-      await ImportPipeline(mapper: TestCsvMapper()).importFile(v1, _testCsvPath);
+      await ImportPipeline(mapper: TestCsvMapper())
+          .importFile(v1, _testCsvPath);
       final beforeRentals = (await v1.query('rentals')).length;
       expect(await v1.getVersion(), 1);
       await v1.close();
@@ -169,10 +184,17 @@ void main() {
       expect((await upgraded.query('rentals')).length, beforeRentals);
       expect(await upgraded.query('attachments'), isEmpty); // exists, empty
       expect(await upgraded.query('sync_conflicts'), isEmpty); // v3, empty
+      // v4: the column exists and every kept vehicle has a value.
+      final upgradedVehicles = await upgraded.query('vehicles');
+      expect(upgradedVehicles, isNotEmpty);
+      for (final v in upgradedVehicles) {
+        expect(v['in_fleet'], anyOf(0, 1));
+      }
 
       // And it is fully usable.
       final id = (await rentals.findByRentalNo(upgraded, 5))!['id'] as String;
-      await engine.setRentalAgreementPhoto(upgraded, rentalId: id, image: _fakeJpeg(4));
+      await engine.setRentalAgreementPhoto(upgraded,
+          rentalId: id, image: _fakeJpeg(4));
       expect(await attachments.rentalAgreement(upgraded, id), isNotNull);
       await upgraded.close();
     });
