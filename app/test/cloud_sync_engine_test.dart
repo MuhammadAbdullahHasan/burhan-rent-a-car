@@ -28,6 +28,9 @@ class FakePostgrest {
     'attachments': {},
   };
   final requests = <String>[];
+
+  /// object name -> bytes, the `agreements` bucket.
+  final bucket = <String, List<int>>{};
   bool failAttachments = false;
   int floor = 60;
 
@@ -74,6 +77,22 @@ class FakePostgrest {
     final segments = request.url.pathSegments; // rest, v1, <table>|rpc, ...
     final q = request.url.queryParameters;
     requests.add('${request.method} ${request.url.path}');
+
+    // ---- storage: list and upload in the agreements bucket ----
+    if (segments.first == 'storage') {
+      if (segments.contains('list')) {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final search = (body['search'] as String?) ?? '';
+        final hits = bucket.keys.where((n) => n.contains(search));
+        return _json([
+          for (final n in hits) {'name': n}
+        ]);
+      }
+      // POST /storage/v1/object/agreements/<folder>/<name>
+      final name = segments.last;
+      bucket[name] = request.bodyBytes;
+      return _json({'Key': name});
+    }
     if (segments[2] == 'dataset_generation') {
       if (request.method == 'POST') {
         generation ??= 'gen-${_stamp()}';
@@ -732,6 +751,156 @@ void main() {
     final again = await engine.syncNow();
     expect(again.notices, isEmpty);
     await db.close();
+  });
+
+  test('a photo taken before the app filed them is filed on a later pass',
+      () async {
+    final db = await openAppDatabase(
+      databaseFactoryFfi,
+      p.join(dir.path, 'backfill.db'),
+    );
+    await engineFor(db).syncNow();
+    final rental = (await db.query('rentals', where: 'rental_no = 30')).first;
+    await LocalSyncEngine().setRentalAgreementPhoto(
+      db,
+      rentalId: rental['id'] as String,
+      image: _tinyPng(),
+      mimeType: 'image/jpeg',
+    );
+    // As the photos taken before this release look: synced, never filed.
+    await db.update('attachments', {'storage_path': null});
+    await db.delete('sync_queue');
+
+    await engineFor(db).syncNow();
+    expect(server.bucket.keys, contains('30.jpg'));
+    expect((await db.query('attachments')).single['storage_path'], '30.jpg');
+    await db.close();
+  });
+
+  test('a number that already has a scan is remembered, not doubled', () async {
+    final db = await openAppDatabase(
+      databaseFactoryFfi,
+      p.join(dir.path, 'backfill2.db'),
+    );
+    await engineFor(db).syncNow();
+    server.bucket['31.jpg'] = [7, 7, 7];
+    final rental = (await db.query('rentals', where: 'rental_no = 31')).first;
+    await LocalSyncEngine().setRentalAgreementPhoto(
+      db,
+      rentalId: rental['id'] as String,
+      image: _tinyPng(),
+      mimeType: 'image/jpeg',
+    );
+    await db.update('attachments', {'storage_path': null});
+    await db.delete('sync_queue');
+
+    await engineFor(db).syncNow();
+    expect(server.bucket['31.jpg'], [7, 7, 7]);
+    expect(server.bucket.keys.where((n) => n.startsWith('31')), hasLength(1));
+    expect((await db.query('attachments')).single['storage_path'], '31.jpg');
+    await db.close();
+  });
+
+  group('a photo taken in the app is filed in the archive by number', () {
+    Future<Database> seeded() async {
+      final db = await openAppDatabase(
+        databaseFactoryFfi,
+        p.join(dir.path, 'photos_${DateTime.now().microsecondsSinceEpoch}.db'),
+      );
+      await engineFor(db).syncNow(); // fill from the cloud
+      return db;
+    }
+
+    test('the first photo of a rental becomes <rental_no>.jpg', () async {
+      final db = await seeded();
+      final rental = (await db.query('rentals', where: 'rental_no = 23')).first;
+      await LocalSyncEngine().setRentalAgreementPhoto(
+        db,
+        rentalId: rental['id'] as String,
+        image: _tinyPng(),
+        mimeType: 'image/jpeg',
+      );
+
+      final summary = await engineFor(db).syncNow();
+      expect(summary.failed, 0, reason: summary.error);
+      expect(server.bucket.keys, contains('23.jpg'));
+      final stored = (await db.query('attachments')).single;
+      expect(stored['storage_path'], '23.jpg');
+      await db.close();
+    });
+
+    test('a number that already has a scan gets -2, then -3', () async {
+      final db = await seeded();
+      server.bucket['24.jpg'] = [9, 9, 9]; // an archive scan already there
+      final rental = (await db.query('rentals', where: 'rental_no = 24')).first;
+
+      await LocalSyncEngine().setRentalAgreementPhoto(
+        db,
+        rentalId: rental['id'] as String,
+        image: _tinyPng(),
+        mimeType: 'image/jpeg',
+      );
+      await engineFor(db).syncNow();
+      expect(server.bucket['24.jpg'], [9, 9, 9], reason: 'scan untouched');
+      expect(server.bucket.keys, contains('24-2.jpg'));
+
+      // A second photo of the same rental takes the next free name.
+      await LocalSyncEngine().setRentalAgreementPhoto(
+        db,
+        rentalId: rental['id'] as String,
+        image: _tinyPng(),
+        mimeType: 'image/jpeg',
+      );
+      await engineFor(db).syncNow();
+      expect(server.bucket.keys, contains('24-3.jpg'));
+      await db.close();
+    });
+
+    test('re-sending after a failure keeps the name it already took', () async {
+      final db = await seeded();
+      final rental = (await db.query('rentals', where: 'rental_no = 25')).first;
+      await LocalSyncEngine().setRentalAgreementPhoto(
+        db,
+        rentalId: rental['id'] as String,
+        image: _tinyPng(),
+        mimeType: 'image/jpeg',
+      );
+
+      server.failAttachments = true;
+      final failed = await engineFor(db).syncNow();
+      expect(failed.failed, 1);
+
+      server.failAttachments = false;
+      final retry = await engineFor(db).syncNow();
+      expect(retry.failed, 0);
+      expect(server.bucket.keys.where((n) => n.startsWith('25')), hasLength(1));
+      expect(server.bucket.keys, contains('25.jpg'));
+      await db.close();
+    });
+
+    test('a rental with no number yet is left for a later pass', () async {
+      final db = await seeded();
+      final pendingId = await LocalSyncEngine().createPendingRental(
+        db,
+        amount: 100,
+      );
+      await db.update('rentals', {'rental_no': null},
+          where: 'id = ?', whereArgs: [pendingId]);
+      await LocalSyncEngine().setRentalAgreementPhoto(
+        db,
+        rentalId: pendingId,
+        image: _tinyPng(),
+        mimeType: 'image/jpeg',
+      );
+      // Push only the attachment, as if the rental had not gone up yet.
+      await db.delete('sync_queue', where: "entity_type = 'rental'");
+
+      final summary = await engineFor(db).syncNow();
+      expect(summary.failed, 0, reason: summary.error);
+      final stored = (await db.query('attachments')).single;
+      expect(stored['storage_path'], isNull);
+      await db.close();
+    });
   });
 
   test('push failures are reported, not hidden', () async {

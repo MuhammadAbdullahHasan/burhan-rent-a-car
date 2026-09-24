@@ -35,9 +35,7 @@ Future<Database> openAppDatabase(
           }
         }
         if (oldVersion < 4) {
-          for (final statement in vehicleInFleetStatements) {
-            await db.execute(statement);
-          }
+          await _addColumns(db, 'vehicles', vehicleInFleetStatements);
           // Until the cloud says otherwise, keep what the app showed
           // before: a vehicle rented in the last two years, or one the
           // owner has described, is in the fleet.
@@ -55,7 +53,33 @@ Future<Database> openAppDatabase(
               )
           ''');
         }
+        if (oldVersion < 5) {
+          await _addColumns(db, 'attachments', attachmentStoragePathStatements);
+        }
       },
     ),
   );
+}
+
+/// Runs "ALTER TABLE ... ADD COLUMN" statements that may already have been
+/// applied. A step that creates a table uses the schema as it stands
+/// today, so a database upgrading across several versions can arrive at a
+/// later step with the column already in place -- adding it again is an
+/// error, and skipping it silently is what the step meant anyway.
+Future<void> _addColumns(
+  Database db,
+  String table,
+  List<String> statements,
+) async {
+  final existing = {
+    for (final row in await db.rawQuery('PRAGMA table_info($table)'))
+      (row['name'] as String).toLowerCase(),
+  };
+  for (final statement in statements) {
+    final match = RegExp(r'ADD COLUMN\s+(\w+)', caseSensitive: false)
+        .firstMatch(statement);
+    final column = match?.group(1)?.toLowerCase();
+    if (column != null && existing.contains(column)) continue;
+    await db.execute(statement);
+  }
 }

@@ -9,7 +9,7 @@
 /// touches the import mapper, not this schema.
 library;
 
-const schemaVersion = 4;
+const schemaVersion = 5;
 
 const List<String> createTableStatements = [
   '''
@@ -134,6 +134,7 @@ const List<String> attachmentsTableStatements = [
     mime_type    TEXT,
     image        BLOB NOT NULL,
     thumbnail    BLOB,
+    storage_path TEXT,
     is_deleted   INTEGER NOT NULL DEFAULT 0,
     version      INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL,
@@ -172,4 +173,15 @@ const List<String> syncConflictsTableStatements = [
 /// which seed it from the last-rental heuristic the app used before.
 const List<String> vehicleInFleetStatements = [
   'ALTER TABLE vehicles ADD COLUMN in_fleet INTEGER NOT NULL DEFAULT 1',
+];
+
+/// Where a photo taken in the app was filed in the `agreements` bucket:
+/// "<rental_no>.jpg" for a rental's first photo, "<rental_no>-2.jpg" for
+/// the next, matching the archive's own naming. Local to the device that
+/// uploaded it -- it is what makes a retry re-use the name it already
+/// took rather than claiming a second one.
+///
+/// Schema version 5. Also applied by `onUpgrade` for older databases.
+const List<String> attachmentStoragePathStatements = [
+  'ALTER TABLE attachments ADD COLUMN storage_path TEXT',
 ];

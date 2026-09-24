@@ -190,6 +190,21 @@ void main() {
       for (final v in upgradedVehicles) {
         expect(v['in_fleet'], anyOf(0, 1));
       }
+      // v5: photos carry where they were filed in the archive bucket.
+      await upgraded.insert('attachments', {
+        'id': 'a1',
+        'entity_type': 'rental',
+        'entity_id': 'r1',
+        'kind': 'rental_agreement',
+        'image': Uint8List.fromList([1, 2, 3]),
+        'storage_path': '96.jpg',
+        'created_at': 'now',
+        'updated_at': 'now',
+      });
+      expect(
+        (await upgraded.query('attachments')).single['storage_path'],
+        '96.jpg',
+      );
 
       // And it is fully usable.
       final id = (await rentals.findByRentalNo(upgraded, 5))!['id'] as String;

@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:burhan_rent_a_car_data/burhan_rent_a_car_data.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../supabase_config.dart';
 import 'package:uuid/uuid.dart';
 
 /// What one sync pass did, for the UI to report.
@@ -37,6 +39,7 @@ const _generationKey = 'cloud_generation';
 const _watermarkPrefix = 'cloud_wm_';
 const _epoch = '1970-01-01T00:00:00.000Z';
 const _pageSize = 500;
+const _archiveBucket = 'agreements';
 const _batchSize = 200;
 const _attachmentBatchSize = 20;
 
@@ -208,6 +211,11 @@ class CloudSyncEngine {
     } catch (e) {
       error ??= e.toString();
     }
+    try {
+      await _fileUnfiledPhotos();
+    } catch (e) {
+      error ??= e.toString();
+    }
     final summary = SyncSummary(
       pushed: pushed,
       pulled: pulled,
@@ -325,8 +333,97 @@ class CloudSyncEngine {
       return;
     }
 
+    if (entityType == 'attachment') {
+      for (final row in rows) {
+        await _fileInArchive(row);
+      }
+    }
+
     final remote = rows.map((r) => _toRemote(table, r)).toList();
     await client.from(table).upsert(remote, ignoreDuplicates: ignoreExisting);
+  }
+
+  /// Photos taken before the app filed them by number (or while their
+  /// rental was still unnumbered) are filed on a later pass, a few at a
+  /// time so a sync is never held up by them.
+  ///
+  /// A number that already has something filed under it is left alone and
+  /// simply remembered: either this very photo was filed by another
+  /// device, or the rental has a scan from before the app -- and in
+  /// neither case should a second copy be added.
+  Future<void> _fileUnfiledPhotos() async {
+    final unfiled = await db.query(
+      'attachments',
+      where: "storage_path IS NULL AND is_deleted = 0 AND kind = ? "
+          "AND entity_type = 'rental'",
+      whereArgs: [kindRentalAgreement],
+      limit: 20,
+    );
+    for (final attachment in unfiled) {
+      final rental =
+          await _rowById('rentals', attachment['entity_id'] as String);
+      final rentalNo = rental?['rental_no'] as int?;
+      if (rentalNo == null) continue;
+
+      final existing = await _archiveNamesFor(rentalNo);
+      if (existing.isNotEmpty) {
+        await db.update(
+          'attachments',
+          {'storage_path': existing.first},
+          where: 'id = ?',
+          whereArgs: [attachment['id']],
+        );
+        continue;
+      }
+      await _fileInArchive(attachment);
+    }
+  }
+
+  /// Files a photo taken in the app in the `agreements` bucket under the
+  /// rental's number -- "96.jpg" for a rental's first photo, "96-2.jpg"
+  /// for the next -- so it sits in the archive beside the scans made
+  /// before the app, and any device can find it by number.
+  ///
+  /// The name it took is kept on this device, so a retry after a failed
+  /// push re-uses it instead of claiming a second name. A rental that has
+  /// no number yet (created offline, not pushed) is left for a later pass;
+  /// the photo is on the rental either way.
+  Future<void> _fileInArchive(Map<String, Object?> attachment) async {
+    if (attachment['entity_type'] != 'rental') return;
+    if (attachment['kind'] != kindRentalAgreement) return;
+    if ((attachment['storage_path'] as String?)?.isNotEmpty ?? false) return;
+
+    final rental = await _rowById('rentals', attachment['entity_id'] as String);
+    final rentalNo = rental?['rental_no'] as int?;
+    if (rentalNo == null) return;
+
+    final name = await _freeArchiveName(rentalNo);
+    await client.storage.from(_archiveBucket).uploadBinary(
+          '$businessFolder/$name',
+          attachment['image'] as Uint8List,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: true,
+          ),
+        );
+    await db.update(
+      'attachments',
+      {'storage_path': name},
+      where: 'id = ?',
+      whereArgs: [attachment['id']],
+    );
+  }
+
+  /// The first name free for [rentalNo]: "96.jpg", else "96-2.jpg",
+  /// "96-3.jpg" ... so a new photo never overwrites a scan already filed
+  /// under that number.
+  Future<String> _freeArchiveName(int rentalNo) async {
+    final taken = await _archiveNamesFor(rentalNo);
+    if (!taken.contains('$rentalNo.jpg')) return '$rentalNo.jpg';
+    for (var i = 2; i <= 99; i++) {
+      if (!taken.contains('$rentalNo-$i.jpg')) return '$rentalNo-$i.jpg';
+    }
+    return '$rentalNo-${DateTime.now().millisecondsSinceEpoch}.jpg';
   }
 
   List<String> _notices = [];
@@ -481,6 +578,22 @@ class CloudSyncEngine {
     });
     await _apply(table, server);
     return true;
+  }
+
+  /// Everything already filed under [rentalNo]: "96.jpg", "96-2.jpg" ...
+  /// A search matches on substring, so "961.jpg" can come back too; only
+  /// exact names for this number are kept.
+  Future<Set<String>> _archiveNamesFor(int rentalNo) async {
+    final names = <String>{};
+    final pattern = RegExp('^$rentalNo(-\\d+)?\\.jpg\$');
+    for (final search in ['$rentalNo.', '$rentalNo-']) {
+      final objects = await client.storage.from(_archiveBucket).list(
+            path: businessFolder,
+            searchOptions: SearchOptions(search: search),
+          );
+      names.addAll(objects.map((o) => o.name).where(pattern.hasMatch));
+    }
+    return names;
   }
 
   // ---- pull --------------------------------------------------------------
