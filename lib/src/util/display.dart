@@ -74,3 +74,27 @@ List<String> _remarkLines(Object? remarks) {
   if (text.trim().isEmpty) return const [];
   return text.split('\n');
 }
+
+/// A phone number with its country code in front, for display only -- the
+/// stored value is never changed.
+///
+/// The old system recorded Pakistani numbers in national form
+/// ("03001234567", "021-34648809"); anything already carrying a country
+/// code (a "+" or a leading "00") is left exactly as it is, because the
+/// archive holds UK, UAE, US, Saudi and Australian numbers too. A string
+/// that is not a phone number at all comes back untouched.
+String? formatPhoneWithCountryCode(Object? phone,
+    {String countryCode = '+92'}) {
+  final raw = phone?.toString().trim();
+  if (raw == null || raw.isEmpty) return null;
+  if (raw.startsWith('+')) return raw;
+  if (raw.startsWith('00')) return '+${raw.substring(2)}';
+
+  final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  // National form is a leading 0 then 9-10 digits (0300 1234567, 021 3464
+  // 8809). Anything else -- a bare "12345", a note -- is left alone.
+  if (!digits.startsWith('0') || digits.length < 9 || digits.length > 12) {
+    return raw;
+  }
+  return '$countryCode ${digits.substring(1)}';
+}

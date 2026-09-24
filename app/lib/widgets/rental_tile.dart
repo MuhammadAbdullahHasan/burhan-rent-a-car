@@ -103,37 +103,6 @@ class RentalTile extends StatelessWidget {
           ],
         ),
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            displayOrNA(_formatAmount(rental['amount'])),
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-          if (rental['balance'] != null && (rental['balance'] as num) > 0)
-            Text(
-              'Bal ${_formatAmount(rental['balance'])}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.error,
-              ),
-            ),
-        ],
-      ),
     );
   }
-}
-
-String? _formatAmount(Object? value) {
-  if (value == null) return null;
-  final number = value is num ? value : num.tryParse(value.toString());
-  if (number == null) return value.toString();
-  return number.toStringAsFixed(0).replaceAllMapped(
-        RegExp(r'(\d)(?=(\d{3})+$)'),
-        (m) => '${m[1]},',
-      );
 }

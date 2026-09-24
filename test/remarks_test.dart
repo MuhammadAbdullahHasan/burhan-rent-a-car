@@ -64,4 +64,29 @@ void main() {
       expect(remarksWithout(null, ['Father/Husband']), isNull);
     });
   });
+
+  group('phone numbers shown with a country code', () {
+    test('a Pakistani mobile gains +92 and loses the leading 0', () {
+      expect(formatPhoneWithCountryCode('03001234567'), '+92 3001234567');
+      expect(formatPhoneWithCountryCode('0300-1234567'), '+92 3001234567');
+      expect(formatPhoneWithCountryCode('0321 2098809'), '+92 3212098809');
+    });
+
+    test('a Karachi landline gains +92 too', () {
+      expect(formatPhoneWithCountryCode('021-34648809'), '+92 2134648809');
+    });
+
+    test('a number that already carries its country code is untouched', () {
+      expect(formatPhoneWithCountryCode('+971 529526197'), '+971 529526197');
+      expect(formatPhoneWithCountryCode('+1 267 391-3025'), '+1 267 391-3025');
+      expect(formatPhoneWithCountryCode('0044 7454395711'), '+44 7454395711');
+    });
+
+    test('anything that is not a phone number is left as written', () {
+      expect(formatPhoneWithCountryCode('as above'), 'as above');
+      expect(formatPhoneWithCountryCode('12345'), '12345');
+      expect(formatPhoneWithCountryCode(''), isNull);
+      expect(formatPhoneWithCountryCode(null), isNull);
+    });
+  });
 }

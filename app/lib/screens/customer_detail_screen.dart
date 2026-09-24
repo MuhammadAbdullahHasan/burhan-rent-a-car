@@ -170,7 +170,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         ),
                       ),
                     const SizedBox(height: 12),
-                    DetailField(label: 'Phone', value: customer['phone']),
+                    DetailField(
+                        label: 'Phone',
+                        value: formatPhoneWithCountryCode(customer['phone'])),
                     DetailField(label: 'CNIC', value: customer['cnic']),
                     DetailField(
                         label: 'License #', value: customer['license_no']),

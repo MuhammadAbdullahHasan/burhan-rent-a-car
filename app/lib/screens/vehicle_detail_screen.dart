@@ -148,7 +148,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              SectionCard(
+              CollapsibleSectionCard(
                 title: 'CUSTOMERS WHO RENTED THIS VEHICLE',
                 action: Text('${data.customers.length}'),
                 child: data.customers.isEmpty

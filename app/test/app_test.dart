@@ -106,6 +106,10 @@ void main() {
     );
     await settle(t);
     expect(find.text('CUSTOMERS WHO RENTED THIS VEHICLE'), findsOneWidget);
+
+    // The list is a dropdown: closed until the card is tapped.
+    expect(find.text('Billa Khan'), findsNothing);
+    await tapAndSettle(t, find.text('CUSTOMERS WHO RENTED THIS VEHICLE'));
     expect(find.text('Billa Khan'), findsWidgets);
 
     // The vehicle's own rental list was dropped: its rentals are reached

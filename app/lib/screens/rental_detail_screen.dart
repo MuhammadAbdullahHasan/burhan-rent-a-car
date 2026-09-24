@@ -320,9 +320,16 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                     ),
                     DetailField(
                       label: 'Cell number',
-                      value: data.customer?['phone'],
+                      value:
+                          formatPhoneWithCountryCode(data.customer?['phone']),
                     ),
                     DetailField(label: 'CNIC', value: data.customer?['cnic']),
+                    // Recorded on the paper form; the import keeps it in the
+                    // remarks, so it reads as its own row here.
+                    DetailField(
+                      label: 'Passport',
+                      value: remarksValue(rental['remarks'], 'Passport'),
+                    ),
                     DetailField(
                         label: 'Start date', value: rental['start_date']),
                     DetailField(
@@ -333,14 +340,12 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                         label: 'Return time', value: rental['end_time']),
                     DetailField(
                         label: 'Booked days', value: rental['book_days']),
-                    DetailField(label: 'Amount', value: rental['amount']),
-                    DetailField(label: 'Balance', value: rental['balance']),
                     DetailField(
                       label: 'Remarks',
                       // The two labels above have their own rows now.
                       value: remarksWithout(
                         rental['remarks'],
-                        const ['Father/Husband', 'Ref. NIC'],
+                        const ['Father/Husband', 'Ref. NIC', 'Passport'],
                       ),
                     ),
                   ],
@@ -352,7 +357,10 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                 child: Column(
                   children: [
                     DetailField(label: 'Name', value: rental['ref_name']),
-                    DetailField(label: 'Contact', value: rental['ref_contact']),
+                    DetailField(
+                      label: 'Contact',
+                      value: formatPhoneWithCountryCode(rental['ref_contact']),
+                    ),
                     DetailField(
                       label: 'CNIC',
                       value: remarksValue(rental['remarks'], 'Ref. NIC'),
@@ -367,7 +375,8 @@ class _RentalDetailScreenState extends State<RentalDetailScreen> {
                 icon: Icons.person,
                 title: 'CUSTOMER',
                 label: displayOrNA(data.customer?['full_name']),
-                subtitle: displayOrNA(data.customer?['phone']),
+                subtitle: displayOrNA(
+                    formatPhoneWithCountryCode(data.customer?['phone'])),
                 onTap: data.customer == null
                     ? null
                     : () async {

@@ -230,3 +230,75 @@ class AsyncList<T> extends StatelessWidget {
     );
   }
 }
+
+/// A [SectionCard] that starts closed and opens on tap -- for a list long
+/// enough that it would otherwise bury what is under it. The count stays
+/// visible while closed, so the card still says how much is inside.
+class CollapsibleSectionCard extends StatefulWidget {
+  final String title;
+  final Widget? action;
+  final Widget child;
+  final bool initiallyExpanded;
+
+  const CollapsibleSectionCard({
+    super.key,
+    required this.title,
+    required this.child,
+    this.action,
+    this.initiallyExpanded = false,
+  });
+
+  @override
+  State<CollapsibleSectionCard> createState() => _CollapsibleSectionCardState();
+}
+
+class _CollapsibleSectionCardState extends State<CollapsibleSectionCard> {
+  late bool _open = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                  if (widget.action != null) widget.action!,
+                  const SizedBox(width: 4),
+                  AnimatedRotation(
+                    turns: _open ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 160),
+                    child: Icon(
+                      Icons.expand_more,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_open)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: widget.child,
+            ),
+        ],
+      ),
+    );
+  }
+}
